@@ -24,64 +24,108 @@ them. The title card is the architecture; a still version, with the run-metadata
 
 ## How to run
 
+The terminal route, in order. Every step has a console equivalent. Nothing is pre-loaded: the database starts
+empty and the supplied file is loaded by step 4.
+
+### 1. Install Docker (Ubuntu)
+
+Install Docker Engine with the Compose plugin (or Docker Desktop for Linux) and check it:
+
 ```bash
-docker compose up --build        # PostgreSQL, the API and the console on http://localhost:3000
+docker compose version
 ```
 
-Three ports are involved: the console on **http://localhost:3000** (bound to localhost), PostgreSQL on
-**localhost:5433** for `psql`, and the API on **8000** inside the Compose network only. The console calls the API
-server-side, so the shared token never reaches the browser.
-
-Open http://localhost:3000. The database starts empty; one button loads `data/raw_tickets.csv` into bronze and
-builds silver and gold, and the Pipeline screen shows what went into each stage and what came out. The same run
-from a terminal:
+### 2. Clone and start the stack
 
 ```bash
-docker compose run --rm pipeline run                 # load and build; running again is idempotent, changes nothing
-docker compose run --rm --entrypoint pytest pipeline -q   # the test suite
-psql -h localhost -p 5433 -U medallion medallion     # password: medallion
+git clone https://github.com/mahi80/bronze.git && cd bronze
+docker compose up -d --build        # first build takes a few minutes
+```
 
-# agents (need a provider: copy .env.example to .env and fill it in)
-docker compose run --rm pipeline evals               # score both agents against the golden sets
-docker compose run --rm pipeline report --update-readme   # write reports/agent_report.md and refresh this file
-docker compose run --rm pipeline agents classify     # propose mappings for values not seen before
-docker compose run --rm pipeline agents dq           # propose rules from the bronze profile
-docker compose run --rm pipeline proposals           # what is waiting for a person
+This starts PostgreSQL, the API and the console. Three ports: the console on **http://localhost:3000** (bound to
+localhost), PostgreSQL on **localhost:5433**, and the API on **8000** inside the Compose network only — the
+console calls it server-side, so the shared token never reaches the browser.
+
+### 3. Put the data where bronze reads it
+
+The supplied file is already in place and mounted read-only:
+
+```
+data/raw_tickets.csv     10,280 rows · 13 columns
+```
+
+A later delivery goes where the console's **Upload CSV** writes it:
+
+```bash
+cp ~/Downloads/march_delivery.csv data/uploads/     # a new delivery, same place as a console upload
+wc -l data/raw_tickets.csv                          # 10,281 lines: one header + 10,280 rows
+head -3 data/raw_tickets.csv                        # a look before loading
+```
+
+Bronze reads every `*.csv` in `data/` and `data/uploads/` at the start of each run and loads each file once per
+content hash. There is no separate upload command: copying the file and running step 4 is the upload.
+
+### 4. Load bronze, build silver and gold
+
+```bash
+docker compose run --rm pipeline run     # the terminal's Load and run
+```
+
+This loads every new file into bronze, cleans and validates it into silver, aggregates gold, and runs the
+threshold checks; the JSON summary is printed. Running it again changes nothing. The console's **Load and run**
+button runs the same code, and **Pipeline** shows what went into each stage and what came out.
+
+### 5. Explore the data (EDA)
+
+```bash
+docker compose run --rm pipeline profile    # writes reports/profile.json: blanks, near-duplicates,
+                                           # swapped columns, out-of-order timestamps, candidate key
+docker compose exec postgres psql -U medallion -d medallion -c "
+  select count(*) as bronze_rows from bronze.tickets_raw;
+  select count(*) as valid, count(*) filter (where is_duplicate) as duplicates from silver.tickets;
+  select unnest(reasons) as reason, count(*) from silver.tickets_rejected group by 1 order by 2 desc;"
+```
+
+The console shows the same without SQL: **Data** for the first 100 bronze rows as delivered and the profile's
+findings, **Pipeline** for the stage counts, **Checks** for the threshold signals. For an interactive prompt from
+the host, `psql -h localhost -p 5433 -U medallion medallion` (password `medallion`; install `postgresql-client` on
+Ubuntu).
+
+### 6. Run the tests
+
+```bash
+docker compose run --rm --entrypoint pytest pipeline -q   # 80 tests, against a real PostgreSQL
+```
+
+### 7. Optional: agents and the approval gate
+
+Agents need a model provider; without one, everything above still runs. After filling `.env`, recreate the
+services so they see it (`docker compose up -d`).
+
+```bash
+cp .env.example .env                                     # LLM_PROVIDER, LLM_API_KEY, models
+docker compose run --rm pipeline agents dq               # propose rules from the bronze profile
+docker compose run --rm pipeline agents classify         # propose mappings for values not seen before
+docker compose run --rm pipeline proposals               # what is waiting for a person
 docker compose run --rm pipeline approve --task category --key aircon --set HVAC
-docker compose run --rm pipeline prompts             # write the exact prompts, without calling a model
+docker compose run --rm pipeline prompts                 # write the exact prompts, without calling a model
+docker compose run --rm pipeline evals                   # score both agents against the golden sets
+docker compose run --rm pipeline report --update-readme  # write reports/agent_report.md and refresh this file
+```
 
-docker compose --profile batch up --build            # no console: PostgreSQL and one pipeline run
+The console's **Review** screen is the same gate: approve, correct while approving, or reject. A rejected value
+stays counted as unmapped and is listed so the decision can be reopened.
+
+### 8. Without the console
+
+```bash
+docker compose --profile batch up --build            # PostgreSQL and one pipeline run, then exit
 ```
 
 Without Docker: `pip install -r requirements.txt`, set `DATABASE_URL`, then `python -m pipeline run`. Its default
 is `localhost:5432`; to run it against the Compose database instead, use
 `postgresql://medallion:medallion@localhost:5433/medallion` (Compose publishes PostgreSQL on 5433 so it does not
 clash with a local install).
-
-### Linux (Ubuntu)
-
-1. Install Docker Engine with the Compose plugin (or Docker Desktop for Linux) and check it:
-
-   ```bash
-   docker compose version
-   ```
-
-2. Clone and start; the first build takes a few minutes, then PostgreSQL, the API and the console are up:
-
-   ```bash
-   git clone https://github.com/mahi80/bronze.git && cd bronze
-   docker compose up --build
-   ```
-
-3. Open http://localhost:3000 and click **Load and run**. The database is empty until that click: the supplied
-   file lands in bronze, silver is cleaned and validated, gold is aggregated, and each stage shows what went in
-   and what came out. Upload a CSV next and run again to see a later delivery ingested through the same path.
-   From a terminal, the equivalent is:
-
-   ```bash
-   docker compose run --rm pipeline run
-   docker compose run --rm pipeline run     # a second time: the row counts do not change
-   ```
 
 The supplied file arrives byte-identical — `sha256sum data/raw_tickets.csv` starts with `2bf36d21` — because
 `.gitattributes` marks it binary, so no checkout setting can rewrite its line endings.
