@@ -90,7 +90,8 @@ def create_app(settings: config.Settings | None = None, transport=None) -> FastA
     @api.post("/files")
     async def upload_file(file: UploadFile = File(...)):
         """Accept a delivered CSV into the uploads directory. The next run loads it through the same bronze path
-        as data/, so the manifest, header check and row hashes apply unchanged."""
+        as data/, so the manifest, header check and row hashes apply unchanged. A file bronze could not load is
+        refused here (bronze.refusal)."""
         name = Path(file.filename or "").name
         if not name.lower().endswith(".csv"):
             raise HTTPException(400, "Only .csv files are accepted.")
@@ -99,8 +100,11 @@ def create_app(settings: config.Settings | None = None, transport=None) -> FastA
             raise HTTPException(413, "The file is larger than 20 MB.")
         if not content.strip():
             raise HTTPException(400, "The file is empty.")
+        problem = bronze.refusal(content)
+        if problem:
+            raise HTTPException(400, problem)
         digest = hashlib.sha256(content).hexdigest()
-        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name)[:80]
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name[:-4])[:76] + ".csv"    # bronze globs *.csv: keep that suffix
         settings.uploads_dir.mkdir(parents=True, exist_ok=True)
         path = settings.uploads_dir / f"{digest[:12]}-{safe}"
         path.write_bytes(content)                 # same content lands on the same name: the manifest skips a re-delivery

@@ -38,7 +38,7 @@ export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number
     <div className="page-heading">
       <div>
         <h1>Review</h1>
-        <p>Agents write proposals and a person decides. Confident category and issue mappings are applied provisionally until reviewed; everything else is held. Either way, silver changes only on the next run.</p>
+        <p>Agents write proposals and a person decides. A recurring category the rule set has not seen is queued here by the run itself, with no proposed value. Confident category and issue mappings are applied provisionally until reviewed; everything else is held. Either way, silver changes only on the next run.</p>
       </div>
     </div>
   );
@@ -101,7 +101,7 @@ export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number
       {mappings.length + rules.length === 0 ? (
         <section className="panel">
           <EmptyState icon={ClipboardCheck} title="Nothing is waiting for a decision"
-            description="When an agent proposes a mapping or a rule, it is listed here with its evidence. The pipeline never waits for this page: unmapped values are loaded, flagged and counted."
+            description="When an agent proposes a mapping or a rule, or a run meets a recurring category with no mapping, it is listed here with its evidence. The pipeline never waits for this page: unmapped values are loaded, flagged and counted."
             action={<button className="button secondary" onClick={() => onNavigate("agents")}>Go to agents<ArrowRight size={15} /></button>} />
         </section>
       ) : (
@@ -135,14 +135,14 @@ export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number
                     {!categoryFor(item) && <option value="">Choose a category</option>}
                     {categories.map((category) => <option key={category} value={category}>{category}</option>)}
                   </select>
-                  {categoryFor(item) !== item.value && <span className="table-subtitle">Agent proposed {item.value}</span>}
+                  {categoryFor(item) !== item.value && <span className="table-subtitle">{item.model ? `Agent proposed ${item.value}` : "No proposal: queued by the run"}</span>}
                 </>
               ) },
               { key: "confidence", label: "Confidence", align: "right", sortBy: (item) => item.confidence, render: (item) => item.confidence === null ? "—" : (
                 <span className="meter-cell">{item.confidence.toFixed(2)}<Meter share={item.confidence} tone={item.status === "proposed" ? "amber" : "teal"} label={`Confidence ${item.confidence}`} /></span>
               ) },
               { key: "status", label: "Status", render: (item) => <StatusBadge status={item.status} /> },
-              { key: "reason", label: "Agent's reason", render: (item) => (
+              { key: "reason", label: "Reason", render: (item) => (
                 <>
                   {item.reason || "—"}{item.model && <span className="table-subtitle">{item.model}</span>}
                   <span className="table-subtitle">If rejected, {plural(item.affected, "ticket")} {item.affected === 1 ? "stays" : "stay"} counted as unmapped.</span>

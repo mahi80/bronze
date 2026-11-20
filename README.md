@@ -11,9 +11,10 @@ https://github.com/user-attachments/assets/067373b7-cecc-4475-9430-a1b94dd9e33c
 
 A five and a half minute narrated walkthrough, recorded in the console: an empty database, the supplied file
 loaded with one click, the three pipeline stages shown separately, a second delivery uploaded through the browser,
-the two mappings it puts in front of a person, a rejected value reopened and approved, and the re-run that applies
-them. The title card is the architecture; a still version, with the run-metadata tables, is in
-`docs/architecture.png`, and the same video ships in the repository as `docs/walkthrough.mp4`.
+the two unseen categories the run queues for a person (no model is involved), a rejected value reopened and
+approved, and the re-run that applies them. The title card is the architecture; a still version, with the
+run-metadata tables, is in `docs/architecture.png`, and the same video ships in the repository as
+`docs/walkthrough.mp4`.
 
 | | |
 |---|---|
@@ -129,7 +130,7 @@ The supplied file is already in place and mounted read-only:
 data/raw_tickets.csv     10,280 rows · 13 columns
 ```
 
-A later delivery goes where the console's **Upload CSV** writes it:
+A later delivery goes where the console's **Load a CSV** writes it:
 
 ```bash
 cp ~/Downloads/march_delivery.csv data/uploads/     # a new delivery, same place as a console upload
@@ -138,7 +139,9 @@ head -3 data/raw_tickets.csv                        # a look before loading
 ```
 
 Bronze reads every `*.csv` in `data/` and `data/uploads/` at the start of each run and loads each file once per
-content hash. There is no separate upload command: copying the file and running step 4 is the upload.
+content hash. There is no separate upload command: copying the file and running step 4 is the upload. The console
+refuses a file bronze could not load (another header, a row with the wrong number of fields, not UTF-8). A file
+copied in by hand is checked by the run instead, which fails with the reason until the file is removed.
 
 ### 4. Load bronze, build silver and gold
 
@@ -186,8 +189,8 @@ cp .env.example .env
 LLM_PROVIDER=anthropic
 LLM_API_KEY=sk-ant-...
 # optional — these are the defaults:
-LLM_MODEL_SMALL=claude-haiku-5-5      # classification and data quality
-LLM_MODEL_STRONG=claude-sonnet-5-5    # rule proposals
+LLM_MODEL_SMALL=claude-haiku-5-5      # Semantic Classification Agent
+LLM_MODEL_STRONG=claude-sonnet-5-5    # Data Quality Agent
 LLM_TOKEN_BUDGET=400000               # hard cap per command; a load is not blocked when it is reached
 ```
 
@@ -201,6 +204,10 @@ LLM_MODEL_SMALL=<model your endpoint serves>
 LLM_MODEL_STRONG=<model your endpoint serves>
 LLM_API_KEY=<the endpoint's key, if it needs one>
 ```
+
+Compose maps `host.docker.internal` to the host for the `pipeline` and `api` services, so this works on Docker
+Desktop and Docker Engine on Linux alike. On Linux the server on the host must listen on `0.0.0.0`, not only
+`127.0.0.1`; for Ollama that is `OLLAMA_HOST=0.0.0.0 ollama serve`.
 
 One-off `run` commands read `.env` every time. If you will also start agents from the console, recreate the
 services once after editing so the API container sees the file (`docker compose up -d`).
@@ -216,18 +223,25 @@ docker compose run --rm pipeline report --update-readme  # stored runs; no model
 ```
 
 Without a provider, `agents` and `evals` stop with "agents are not configured" (exit code 3); `run`, `profile`,
-`proposals`, `approve`, `prompts` and `report` work regardless. `LLM_PROVIDER=replay` answers from recordings in
-`evals/recordings/` instead of a live model — that directory ships empty, and `export-recordings` fills it from
-runs you already paid for.
+`proposals`, `approve`, `prompts` and `report` work regardless. `LLM_PROVIDER=replay` answers from recordings
+instead of a live model: `export-recordings` writes the calls already stored in `ops.agent_call` to
+`evals/recordings/`, and an eval run then needs no key. A recording is found by its prompt, not by the model that
+answered it. A consistency run still needs live calls, since three uncached answers are the point. The
+`evals/recordings/` directory ships empty.
 
 The console's **Review** screen is the same gate: approve, correct while approving, or reject. A rejected value
 stays counted as unmapped and is listed so the decision can be reopened.
 
 ### 8. Without the console
 
+After cloning, skip `docker compose up` and run step 4 on its own:
+
 ```bash
-docker compose --profile batch up --build            # PostgreSQL and one pipeline run, then exit
+docker compose run --rm pipeline run     # starts PostgreSQL, builds only the Python image, runs once and exits
 ```
+
+The `batch` profile only keeps this one-shot service out of `docker compose up`. `--profile batch up` is not a
+console-free route: Compose also starts every service that has no profile, so the API and the console come up.
 
 Without Docker: `pip install -r requirements.txt`, set `DATABASE_URL`, then `python -m pipeline run`. Its default
 is `localhost:5432`; to run it against the Compose database instead, use
@@ -235,7 +249,7 @@ is `localhost:5432`; to run it against the Compose database instead, use
 clash with a local install).
 
 The supplied file arrives byte-identical — `sha256sum data/raw_tickets.csv` starts with `2bf36d21` — because
-`.gitattributes` marks it binary, so no checkout setting can rewrite its line endings.
+`.gitattributes` marks it as not text (`-text`), so no checkout setting can rewrite its line endings.
 
 ## What the data contains
 
@@ -504,6 +518,7 @@ Nothing an agent proposes changes silver on its own.
 |---|---|
 | Category or issue mapping at 0.9 confidence or more, not `unknown` | Applied as provisional and listed for review |
 | Lower confidence, or `unknown` | Held as proposed; not applied |
+| A recurring category with no mapping, queued by a run | Held with no proposed value; approved only with a category a person chooses |
 | Person merge | Always held for a person, whatever the confidence |
 | Data Quality Agent proposal | Must pass the SQL guard and the claimed-vs-measured row count, then be approved by a person; it runs as a check and never rewrites silver |
 | Approved mappings | `export-rules` writes them back to `rules/*.csv`, so the approval is a reviewable commit |
@@ -630,8 +645,8 @@ candidates failed that test:
 
 The limits I would watch next are cost and review load. $0.50 to evaluate is cheap; running the Data Quality
 Agent on every delivery is not, and a queue of 35 proposals is real work. The 0.9 confidence and three-row
-thresholds are starting values, not tuned ones. The first changes I would make are a row-weighted hazard score,
-golden sets split by delivery date, and a recorded live replay so the eval runs without a key.
+thresholds are starting values, not tuned ones. The first changes I would make are a row-weighted hazard score
+and golden sets split by delivery date.
 
 ## At 100 times the volume, with daily incremental loads
 
@@ -683,7 +698,7 @@ three gold models, each with its reconciliation. Uploading and running is the ro
 | Pipeline | The three stages separately: files and rows into bronze, valid/quarantined/duplicate rows out of silver, the three gold models with their row counts, each linking to its detail screen |
 | Runs | Run history. Per run: the stages, the measured effect of every rule, alerts and drift, lineage |
 | Data | The first 100 rows of bronze exactly as delivered, and the fixed-size profile the Data Quality Agent reads: blanks per column, near-duplicates, values in the wrong column, timestamps out of order, the candidate key, and which columns are sensitive and why |
-| Review | Agent proposals with their evidence. For a mapping: value, confidence, reason, and how many tickets depend on the decision. For a rule: the SQL, the claimed and the measured row count. Approve, correct while approving, or reject; a rejected value stays counted as unmapped and is listed so the decision can be reopened |
+| Review | Agent proposals with their evidence, and recurring categories a run found with no mapping. For a mapping: value, confidence, reason, and how many tickets depend on the decision. For a rule: the SQL, the claimed and the measured row count. Approve, correct while approving, or reject; a rejected value stays counted as unmapped and is listed so the decision can be reopened |
 | Data quality | Every cleaning rule with its measured effect, the quarantine with reasons, flags, column tags |
 | Gold | The three models, filterable and sortable, with coverage beside every rate |
 | Ticket trace | One ticket from the line in the file to silver, column by column, and whether gold counts it (`docs/console-trace.png`) |
@@ -707,9 +722,10 @@ three gold models, each with its reconciliation. Uploading and running is the ro
 Without Docker: `CONSOLE_API_TOKEN=<secret> uvicorn pipeline.api:app`, then in `console/` run `npm install` and
 `CONSOLE_API_TOKEN=<secret> npm run dev`.
 
-The screenshots show the output of the supplied file. The Review and Agents screens have proposals to show only
-after an agent run; they were exercised in a browser with the test stub, and no stub output appears in this
-README.
+The screenshots show the output of the supplied file. Review fills after an agent run, or when a delivery brings
+a recurring category the rule set has not seen; the walkthrough shows the second case, where no model is
+involved. Agent proposals on the Review and Agents screens were exercised in a browser with the test stub, and no
+stub output appears in this README.
 
 ## Repository
 

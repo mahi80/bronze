@@ -6,7 +6,7 @@ from pathlib import Path
 from pipeline import db, profiler
 
 from . import classifier, dq_agent, evals, report, review
-from .llm import LLM, LLMDisabled
+from .llm import LLM, LLMDisabled, prompt_key
 
 log = logging.getLogger("agents")
 TASKS = ["category", "person", "issue"]
@@ -164,15 +164,20 @@ def cmd_export_recordings(args, settings) -> int:
     conn = _connect(settings)
     target = Path(settings.replay_dir)
     target.mkdir(parents=True, exist_ok=True)
-    count = 0
+    count = skipped = 0
     for key, task, provider, model, version, request, response, tokens_in, tokens_out, latency in conn.execute(
             "SELECT cache_key, task, provider, model, prompt_version, request, response, input_tokens, output_tokens, latency_ms "
             "FROM ops.agent_call WHERE provider NOT IN ('stub', 'replay')"):
-        (target / f"{key}.json").write_text(json.dumps(
+        if "salt" not in request:
+            # A call stored before the salt was part of the request cannot be matched to the prompt it answered.
+            skipped += 1
+            continue
+        name = prompt_key(version, request["system"], request["user"], request["schema"], request["salt"])
+        (target / f"{name}.json").write_text(json.dumps(
             {"task": task, "provider": provider, "model": model, "prompt_version": version, "input_tokens": tokens_in,
              "output_tokens": tokens_out, "latency_ms": latency, "request": request, "response": response}, indent=1, ensure_ascii=False), encoding="utf-8")
         count += 1
-    print(json.dumps({"recordings": count, "dir": str(target)}))
+    print(json.dumps({"recordings": count, "skipped_unidentifiable": skipped, "dir": str(target)}))
     return 0
 
 

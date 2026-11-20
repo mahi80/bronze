@@ -5,10 +5,12 @@ from dataclasses import replace
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
 from agents import checks, classifier, dq_agent, evals, guard, report, review
 from agents.classifier import Item
-from agents.llm import LLM, BudgetExceeded, LLMDisabled, LLMOutputError, cache_key
+from agents.cli import cmd_export_recordings
+from agents.llm import LLM, BudgetExceeded, LLMDisabled, LLMOutputError
 from conftest import run_pipeline
 from pipeline import profiler
 from stub_model import StubModel
@@ -147,13 +149,22 @@ def test_token_budget_stops_classification_without_failing(clean, settings):
         llm.complete_json(task="t", prompt_version="v", system="s", user="fresh", schema={"type": "object"})
 
 
-def test_replay_provider_answers_only_from_recordings(clean, settings, tmp_path):
+def test_replay_provider_answers_only_from_recordings(clean, settings, tmp_path, capsys):
     replay = replace(settings, llm_provider="replay", replay_dir=tmp_path)
     schema = {"type": "object"}
     with pytest.raises(LLMDisabled):
         LLM(replay, clean).complete_json(task="t", prompt_version="v", system="s", user="u", schema=schema)
-    key = cache_key("replay", "replay-small", "v", "s", "u", schema)
-    (tmp_path / f"{key}.json").write_text(json.dumps({"response": {"ok": True}}))
+
+    # export writes the file replay expects: keyed by the prompt and its salt, not by the provider that answered
+    rows = [("test-export", {"system": "s", "user": "u", "schema": schema, "salt": ""}, {"ok": True}),
+            ("test-export-legacy", {"system": "s", "user": "u", "schema": schema}, {"ok": True})]
+    for key, request, response in rows:
+        clean.execute("INSERT INTO ops.agent_call (cache_key, task, provider, model, prompt_version, request, response) "
+                      "VALUES (%s, 't', 'anthropic', 'claude-haiku-5-5', 'v', %s, %s)", (key, Jsonb(request), Jsonb(response)))
+    clean.commit()
+    assert cmd_export_recordings(None, replay) == 0
+    assert json.loads(capsys.readouterr().out) == {"recordings": 1, "skipped_unidentifiable": 1, "dir": str(tmp_path)}
+
     result = LLM(replay, clean).complete_json(task="t", prompt_version="v", system="s", user="u", schema=schema)
     assert result.data == {"ok": True} and result.cached
 

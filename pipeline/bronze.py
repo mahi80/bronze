@@ -1,6 +1,7 @@
 """Bronze: load each delivered file exactly as it is, with lineage metadata. Re-runnable."""
 import csv
 import hashlib
+import io
 import logging
 from collections import Counter
 from pathlib import Path
@@ -32,6 +33,30 @@ def file_sha256(path: Path) -> str:
 
 def row_hash(fields: list[str]) -> str:
     return hashlib.sha256(FIELD_SEPARATOR.join(fields).encode("utf-8")).hexdigest()
+
+
+def refusal(content: bytes) -> str | None:
+    """Why load_file would refuse this content, or None. The console checks an upload with it before storing the
+    file: a file bronze cannot load fails every later run until someone removes it from disk."""
+    if b"\x00" in content:
+        return "The file contains a NUL byte, which bronze does not store."
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return "The file is not UTF-8 text."
+    try:
+        reader = csv.reader(io.StringIO(text, newline=""))
+        header = next(reader, None)
+        if header != EXPECTED_COLUMNS:
+            return "The header must be exactly these 13 columns: " + ", ".join(EXPECTED_COLUMNS) + "."
+        for number, fields in enumerate(reader, start=1):
+            if len(fields) != len(EXPECTED_COLUMNS):
+                return f"Row {number} has {len(fields)} fields; {len(EXPECTED_COLUMNS)} are expected."
+    except csv.Error as exc:
+        return f"The file is not CSV bronze can parse ({exc})."
+    if FIELD_SEPARATOR in text:
+        return "The file contains a control character that bronze does not store."
+    return None
 
 
 def _check_header(conn: psycopg.Connection, run_id: int, path: Path, header: list[str]) -> None:

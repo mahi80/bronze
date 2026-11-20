@@ -40,10 +40,11 @@ def test_upload_writes_the_file_and_bronze_loads_it(clean, settings):
     uploads = Path(settings.uploads_dir)
     client = console(settings)
     before = clean.execute("SELECT count(*) FROM bronze.tickets_raw").fetchone()[0]
-    result = deliver(client)
+    result = deliver(client, name="March Delivery.CSV")
 
     assert (uploads / result["file"]).read_bytes() == DELIVERY.encode()
-    assert result["file"].endswith("-march_delivery.csv") and len(result["sha256"]) == 12
+    # the name is made safe and keeps the lower-case suffix bronze globs for: a .CSV must not sit there unread
+    assert result["file"].endswith("-March-Delivery.csv") and len(result["sha256"]) == 12
 
     summary = run_pipeline(conn=clean, settings=settings)
     assert summary["bronze"] == before + 6
@@ -62,6 +63,14 @@ def test_upload_rejects_what_a_delivery_is_not(clean, settings, monkeypatch):
     client = console(settings)
     assert client.post("/files", files={"file": ("notes.txt", b"hello", "text/plain")}).status_code == 400
     assert client.post("/files", files={"file": ("empty.csv", b"  \n", "text/csv")}).status_code == 400
+    # a file bronze could not load is refused at the door: once stored, it would fail every later run
+    unloadable = {"wrong_header.csv": b"id,opened,team\n1,2025-01-01,facilities\n",
+                  "ragged_row.csv": (HEADER + "\nTKT-70021,2025-03-05 10:00:00\n").encode(),
+                  "excel_bom.csv": b"\xef\xbb\xbf" + DELIVERY.encode(),
+                  "not_utf8.csv": DELIVERY.encode() + b"\xff\xfe\n"}
+    for name, content in unloadable.items():
+        assert client.post("/files", files={"file": (name, content, "text/csv")}).status_code == 400, name
+    assert not any(path.name.endswith(tuple(unloadable)) for path in Path(settings.uploads_dir).iterdir())
     monkeypatch.setattr(api, "MAX_UPLOAD_BYTES", 48)
     assert client.post("/files", files={"file": ("big.csv", b"x" * 64, "text/csv")}).status_code == 413
     assert not any(path.name.endswith("-big.csv") for path in Path(settings.uploads_dir).iterdir())
@@ -87,6 +96,10 @@ def test_approval_with_a_corrected_category_applies_on_the_next_run(clean, setti
     run_pipeline(conn=clean, settings=settings)          # the first run queues the unseen values
     before = clean.execute("SELECT rule_set_version FROM ops.pipeline_run ORDER BY run_id DESC LIMIT 1").fetchone()[0]
     clean.rollback()
+
+    # a queued value has no proposed category: approving it as it stands must leave it in the queue
+    blank = client.post("/review/mappings", json={"task": "category", "keys": ["chiller maintenance"], "decision": "approve"})
+    assert blank.status_code == 200 and blank.json()["changed"] == 0
 
     decision = client.post("/review/mappings", json={"task": "category", "keys": ["chiller maintenance"],
                                                      "decision": "approve", "set_value": "HVAC"})

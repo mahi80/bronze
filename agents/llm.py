@@ -92,7 +92,7 @@ class LLM:
             raise LLMDisabled("LLM_PROVIDER is 'none'")
         model = self.model_for(tier)
         key = cache_key(self.provider, model, prompt_version, system, user, schema, cache_salt)
-        cached = self._cache_get(key)
+        cached = self._cache_get(key, prompt_version, system, user, schema, cache_salt)
         if cached is not None:
             self.cache_hits += 1
             return LLMResult(cached, self.provider, model, 0, 0, 0, True, key)
@@ -123,14 +123,19 @@ class LLM:
 
         self.tokens_used += tokens_in + tokens_out
         latency = int((time.monotonic() - started) * 1000)
-        self._cache_put(key, task, model, prompt_version, {"system": system, "user": user, "schema": schema}, data, tokens_in, tokens_out, latency)
+        self._cache_put(key, task, model, prompt_version,
+                        {"system": system, "user": user, "schema": schema, "salt": cache_salt},
+                        data, tokens_in, tokens_out, latency)
         log.info("task=%s model=%s tokens_in=%s tokens_out=%s latency_ms=%s", task, model, tokens_in, tokens_out, latency)
         return LLMResult(data, self.provider, model, tokens_in, tokens_out, latency, False, key)
 
     # ------------------------------------------------------------------ cache
-    def _cache_get(self, key: str) -> dict | None:
+    def _cache_get(self, key: str, prompt_version: str, system: str, user: str, schema: dict,
+                   salt: str = "") -> dict | None:
         if self.provider == "replay":
-            path = Path(self.settings.replay_dir) / f"{key}.json"
+            # Recordings come from live calls made under another provider name, so they are looked up by the
+            # prompt alone; the provider and model are deliberately not part of a replay's identity.
+            path = Path(self.settings.replay_dir) / f"{prompt_key(prompt_version, system, user, schema, salt)}.json"
             if not path.exists():
                 raise LLMDisabled(f"replay: no recording for this prompt ({path.name}); record it with a live provider first")
             return json.loads(path.read_text(encoding="utf-8"))["response"]
@@ -202,6 +207,12 @@ class LLM:
 
 def cache_key(provider: str, model: str, prompt_version: str, system: str, user: str, schema: dict, salt: str = "") -> str:
     payload = json.dumps([provider, model, prompt_version, system, user, schema, salt], sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def prompt_key(prompt_version: str, system: str, user: str, schema: dict, salt: str = "") -> str:
+    """Identity of a replayable answer: the prompt, not the provider or model that answered it."""
+    payload = json.dumps([prompt_version, system, user, schema, salt], sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

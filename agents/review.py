@@ -34,7 +34,9 @@ def approve_mappings(conn: psycopg.Connection, task: str, approver: str, keys: l
                      min_confidence: float | None = None, set_value: str | None = None,
                      include_rejected: bool = False) -> int:
     """Approve held or provisional mappings. `set_value` overrides the proposed value (a correction by the reviewer).
-    `include_rejected` lets the console reopen a value that was rejected earlier; the CLI keeps rejected closed."""
+    `include_rejected` lets the console reopen a value that was rejected earlier; the CLI keeps rejected closed.
+    A category queued as Unclassified has no proposed value, so it is approved only with `set_value`: approving
+    the placeholder would take its tickets out of the unmapped check without classifying them."""
     table, _ = MAPS[task]
     where, params = [("status <> 'approved'" if include_rejected else "status IN ('proposed', 'provisional')")], []
     if keys:
@@ -50,6 +52,8 @@ def approve_mappings(conn: psycopg.Connection, task: str, approver: str, keys: l
             raise ValueError("--set is supported for category and priority; edit person and issue mappings in rules/*.csv")
         assignments += f", {MAPS[task][1]} = %s, source = 'human'"
         head.append(set_value)
+    elif task == "category":
+        where.append("category_std <> 'Unclassified'")
     count = conn.execute(f"UPDATE {table} SET {assignments} WHERE {' AND '.join(where)}", head + params).rowcount
     conn.commit()
     return count
