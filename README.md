@@ -7,11 +7,12 @@ The design rule is one sentence: **agents propose, code checks, a person approve
 plain SQL.** No model call sits in the row-by-row path, so the pipeline is deterministic, re-runnable, and works
 with no API key at all.
 
-[![Walkthrough: the console from upload to re-run](docs/walkthrough-poster.png)](docs/walkthrough.mp4)
+https://github.com/user-attachments/assets/65ede0da-6b39-40fd-a31b-34f0ff5e6f1f
 
 A three and a half minute narrated walkthrough, recorded in the console on the supplied file: the first run, a
 second delivery uploaded through the browser, the two mappings it puts in front of a person, and the re-run that
-applies them. The title card is the architecture; a still version is in `docs/architecture.png`.
+applies them. The title card is the architecture; a still version is in `docs/architecture.png`, and the same
+video ships in the repository as `docs/walkthrough.mp4`.
 
 | | |
 |---|---|
