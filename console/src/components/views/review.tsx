@@ -108,7 +108,7 @@ export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number
         <div className="approval-panel">
           <span className="approval-icon"><ShieldCheck size={23} /></span>
           <div>
-            <h2>{plural(mappings.length + rules.length, "proposal")} waiting for a decision</h2>
+            <h2>{plural(mappings.length + rules.length, "decision")} waiting for a person</h2>
             <p>Your decisions are recorded as <strong>{approver}</strong>. Check the value, the confidence and the reason before approving.</p>
           </div>
         </div>
