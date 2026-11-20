@@ -574,13 +574,16 @@ The numbers above are real. They are also narrower than they look.
 
 ### Agents I did not build
 
-I skipped agents where a rule is enough. Resolution notes follow 11 fixed patterns and the regexes match all
-8,705 of them, so a model would add cost and variance for nothing. Schema inference for a single 13-column file
-is the same trade: writing the DDL took me minutes, and reviewing generated DDL would take about as long. Header
-drift is caught by a rule instead, and that is where inference starts to pay, with many sources. Gold design has
-a bigger problem. The useful input is knowing which fields can be trusted, and the timestamps here are random, so
-an agent given only the silver schema would propose sensible mechanics on top of bad assumptions. I would let it
-write date spines and window functions. I wouldn't let it pick the metrics.
+An agent earns its place only if it adds a judgement a rule cannot and a person can review the result. Five
+candidates failed that test:
+
+| Candidate | Why not here | When I would build it |
+|---|---|---|
+| Resolution-note parser | Notes follow 11 fixed patterns and the regexes match all 8,705 of them; a model adds cost and variance for nothing | free text replaces the enum |
+| Schema inference | One 13-column file; writing the DDL took me minutes and reviewing generated DDL would take about as long | many sources, or headers that drift between deliveries |
+| Header-drift checker | A rule on the expected column set catches a missing or renamed column; inference starts to pay only with dozens of differently shaped sources | many heterogeneous feeds |
+| Gold-metric designer | The useful input is knowing which fields can be trusted, and the timestamps here are random, so an agent given only the silver schema would propose sensible mechanics on top of bad assumptions. I would let it write date spines and window functions; I would not let it pick the metrics | trusted timestamps and owner-agreed definitions |
+| Duplicate adjudicator | Matches are ranked on ten fields, the lowest ticket number survives and sparse matches are flagged weak for review first; there is no judgement left for a model | if weak matches became a large share, or free-text near-duplicates needed a call |
 
 The limits I would watch next are cost and review load. $0.50 to evaluate is cheap; running the Data Quality
 Agent on every delivery is not, and a queue of 35 proposals is real work. The 0.9 confidence and three-row
@@ -681,3 +684,46 @@ docs/       architecture.png, walkthrough.mp4 (narrated, captioned), prompt_prev
 The agent tests use a stub in place of a model and prove only the plumbing: batching, validation, retries, the
 SQL guard, the approval gate, scoring. The report generator ignores stub calls, so a test run can never appear
 as a result.
+
+## Approaches considered
+
+Every route I weighed for turning this file into a trustworthy silver layer, including the ones that lost:
+
+| Approach | Verdict | Why, in one line |
+|---|---|---|
+| Cleaning rules in reviewable SQL | **Kept** — the spine | Deterministic, re-runnable with no key; 80 tests pin every rule |
+| Lookup tables for seen spellings | **Kept** | 62 category, 17 priority and 33 submitter spellings resolved without a model |
+| Two agents that propose rules and mappings | **Kept** — for gaps only | They add judgement a rule cannot, and every output passes a check and a person |
+| A model call per row | **Rejected** | Cost and variance scale with rows, and the approval point disappears |
+| A model that writes the whole silver layer | **Rejected** | Non-deterministic and unreviewable; it also fails the "no key" rule |
+| Schema inference | **Rejected** | One 13-column file: minutes to write the DDL, as long to review generated DDL |
+| Header-drift inference | **Rejected** | A rule catches what matters; inference pays only with many sources |
+| Resolution-note parser agent | **Rejected** | 11 patterns match all 8,705 notes |
+| Duplicate adjudication agent | **Rejected** | Ten-field ranking with weak matches flagged leaves nothing to judge |
+| Gold-metric agent | **Rejected** | It would design on top of timestamps that are random here |
+| Ontology, RDF, SPARQL | **Rejected** | Spellings to normalise, not meaning to share across sources — below |
+| dbt, Airflow, an agent framework | **Rejected at this size** | Three linear stages and single-purpose calls; revisit at production scale |
+| Columnar warehouse, partitioning, scheduler | **Deferred** | See "At 100 times the volume" |
+
+### Why not an ontology, RDF and SPARQL
+
+A semantic-web route was the third shape on the table: model the ticket vocabulary as an OWL ontology, load each
+ticket as RDF triples, and use SPARQL for the cleaning checks and gold. It loses to a mapping table here for
+four reasons:
+
+- **The ambiguity is in spelling, not meaning.** 62 spellings of 10 categories is a closed list with one right
+  answer per value, which is a lookup. RDF earns its keep when sources disagree about what a thing *is*; there
+  is one source here, so there is nothing to align.
+- **There is nothing to reason over.** OWL pays for itself with subsumption and inference (a leak is plumbing,
+  plumbing is maintenance, so count it twice). The taxonomy here is flat and gold groups by the same 10 keys, so
+  inference would add a model to debug and change no output.
+- **It adds a second store and a second language.** The promise of this repository is one PostgreSQL database
+  and SQL a reviewer can read line by line before approving it. A triple store beside it means keeping two
+  models of the same rows in step, and SPARQL for queries a reviewer would otherwise read as SQL.
+- **The gate needs readable artifacts.** Approval is over a value→label mapping, or a `SELECT` with a claimed
+  row count. The mapping tables already hold the ontology's useful part — alias, canonical label, evidence,
+  approver — one row per decision.
+
+What would change the verdict: several systems with different schemas that must agree on what a category or a
+building is, joins across sources by entity, or queries whose shape is not known in advance. Then a shared
+vocabulary pays, and the mapping tables would be exported to one.
