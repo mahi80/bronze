@@ -7,12 +7,12 @@ The design rule is one sentence: **agents propose, code checks, a person approve
 plain SQL.** No model call sits in the row-by-row path, so the pipeline is deterministic, re-runnable, and works
 with no API key at all.
 
-https://github.com/user-attachments/assets/95090cf5-a031-4b8d-91bc-40d08d5282dd
+https://github.com/user-attachments/assets/067373b7-cecc-4475-9430-a1b94dd9e33c
 
 A five and a half minute narrated walkthrough, recorded in the console: an empty database, the supplied file
 loaded with one click, the three pipeline stages shown separately, a second delivery uploaded through the browser,
 the two mappings it puts in front of a person, a rejected value reopened and approved, and the re-run that applies
-them. The title card shows the layer flow; the full diagram, adding the console entry and the review loop, is
+them. The title card is the architecture; a still version, with the run-metadata tables, is in
 `docs/architecture.png`, and the same video ships in the repository as `docs/walkthrough.mp4`.
 
 | | |
@@ -27,6 +27,10 @@ them. The title card shows the layer flow; the full diagram, adding the console 
 ```bash
 docker compose up --build        # PostgreSQL, the API and the console on http://localhost:3000
 ```
+
+Three ports are involved: the console on **http://localhost:3000** (bound to localhost), PostgreSQL on
+**localhost:5433** for `psql`, and the API on **8000** inside the Compose network only. The console calls the API
+server-side, so the shared token never reaches the browser.
 
 Open http://localhost:3000. The database starts empty; one button loads `data/raw_tickets.csv` into bronze and
 builds silver and gold, and the Pipeline screen shows what went into each stage and what came out. The same run
@@ -535,10 +539,11 @@ golden sets split by delivery date, and a recorded live replay so the eval runs 
 The brief does not ask for a user interface, and nothing above depends on this one: the pipeline, the agents and
 their tests run without it, and deleting `console/` and `pipeline/api.py` removes it. It ships in the default
 Compose stack because the approval gate is the centre of the design, and a gate is easier to judge on screen than
-as command-line output.
+as command-line output. The UI itself is on port 3000; it calls the API on port 8000 over the Compose network,
+and only 3000 is published.
 
 ```bash
-docker compose up --build     # then open http://localhost:3000
+docker compose up --build     # UI on http://localhost:3000; API on 8000 inside Compose
 ```
 
 ![Console overview: rows per layer, the reconciliation, the threshold checks](docs/console-overview.png)
