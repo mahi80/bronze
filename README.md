@@ -81,8 +81,21 @@ Every expectation in the brief, with a link to the section that answers it.
 | Architecture diagram | [Architecture](#architecture); the static version with the console and the review loop is `docs/architecture.png` |
 | How to run | [How to run](#how-to-run): one `docker compose up --build`, then **Load and run** in the console, or the command in step 4 |
 
-One honest gap: "outliers" is only covered as numeric min/max plus value shapes in the profile; there is no
-percentile scan per column. Gold reports p50 and p90 for resolution time.
+One honest gap there: "outliers" is only covered as numeric min/max plus value shapes in the profile; there is
+no percentile scan per column. Gold reports p50 and p90 for resolution time.
+
+The brief's optional list, with the same treatment: what is built, and what is designed because only one source
+exists here.
+
+| Good to have | Status | Where |
+|---|---|---|
+| End-to-end data lineage: who, what and when for each transformation | **Built** | Every silver row carries the bronze row hash, batch and rule-set version; `ops.lineage_edge` records source, target, transformation, rule-set version, executor and time ([Pipeline behaviour](#pipeline-behaviour)). The console's Ticket trace follows one row end to end ([Operator console](#operator-console)) |
+| Metadata auto-tagging at landing | **Built**, two gaps named | `ops.column_tags` gets a semantic type, sensitivity and the basis for it when a file lands; personal-data values are withheld from the agent's profile ([Pipeline behaviour](#pipeline-behaviour)) |
+| Cross-source reconciliation and dimensional model | **Reconciliation built; the rest designed** | Within the source, every run asserts bronze = silver + rejected + superseded, and each gold model counts every ticket once. Conformed dimensions, a ticket fact table and invoice/roster checks are recommendations in [Dimensional model](#dimensional-model-if-this-became-a-warehouse); there is one source here to reconcile against |
+| Agent evaluation harness: repeatable set, rubric, latency and cost | **Built** | Golden sets and a scoring rubric (`pipeline evals`), consistency repeats, and per-call tokens and latency in `ops.agent_call` ([How the agents are assessed](#how-the-agents-are-assessed)) |
+| Human-in-the-loop gates for high-risk suggestions | **Built** | Nothing an agent proposes changes silver on its own; person merges are always held, and rule proposals need the SQL guard, a measured row count and a person ([Approval gates](#approval-gates)) |
+| Incremental loads and backfill | **Incremental built; backfill designed** | Files are skipped by hash and a second delivery test shows the latest version winning in silver ([Incremental loads and backfill](#incremental-loads-and-backfill)); replay windows and a backfill command are in [At 100 times the volume](#at-100-times-the-volume-with-daily-incremental-loads) |
+| Observability and SLA thinking | **Built** | Five threshold signals in `rules/thresholds.yaml` write `ops.alert` and fail the run; token and cost usage per command; SLA coverage printed beside every rate ([Gold](#gold), [Pipeline behaviour](#pipeline-behaviour)) |
 
 ## How to run
 
