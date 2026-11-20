@@ -54,6 +54,36 @@ files run by a small Python tool because a reviewer can read exactly what each l
 agent framework: three linear stages and single-purpose model calls do not need them. I would add dbt and a
 scheduler at production scale (see "At 100 times the volume").
 
+## How this maps to the brief
+
+Every expectation in the brief, with a link to the section that answers it.
+
+| Part 1 — medallion pipeline | Where |
+|---|---|
+| Bronze: raw ingestion, schema-on-read, no data loss; lineage with source file, `_ingested_at`, `_row_hash` | [Bronze](#bronze) |
+| Silver: cleansed, deduplicated, typed, validated; every rule documented with the reason | [Silver](#silver), [Cleaning rules and why](#cleaning-rules-and-why) |
+| Gold: 2–3 business models, justified | [Gold](#gold) |
+| Layer separation and naming conventions | [Architecture](#architecture) |
+| Idempotent and re-runnable | [Pipeline behaviour](#pipeline-behaviour) |
+| Logging of what happened at each stage | [Pipeline behaviour](#pipeline-behaviour): `ops.pipeline_run`, `ops.stage_log`, `ops.dq_results` |
+| Messiness handled without manual intervention | [Pipeline behaviour](#pipeline-behaviour), [Assumptions to confirm with the data owner](#assumptions-to-confirm-with-the-data-owner) |
+
+| Part 2 — agents | Where |
+|---|---|
+| Option b: profile, natural-language findings, generated SQL, why a rule matters | [Data Quality Agent](#data-quality-agent-option-b) |
+| Option c: enrichment into structured silver columns, batching, caching, cost | [Semantic Classification Agent](#semantic-classification-agent-option-c), [Cost and scale](#cost-and-scale) |
+| Options a and d: not built, with the reason and when they would pay | [Agents I did not build](#agents-i-did-not-build) |
+| Sample input and output for each agent | [Data Quality Agent](#data-quality-agent-option-b) and [Semantic Classification Agent](#semantic-classification-agent-option-c); the full report is `reports/agent_report.md` |
+| The honest take on what each agent saved | [Agent assessment](#agent-assessment), [Caveats](#caveats) |
+| Prompt engineering, context, output constraints, guardrails | [Prompts](#prompts), [Approval gates](#approval-gates) |
+| What changes at 100 times the volume | [At 100 times the volume](#at-100-times-the-volume-with-daily-incremental-loads) |
+| Tradeoffs, including approaches not taken | [Agents I did not build](#agents-i-did-not-build), [Approaches considered](#approaches-considered) |
+| Architecture diagram | [Architecture](#architecture); the static version with the console and the review loop is `docs/architecture.png` |
+| How to run | [How to run](#how-to-run): one `docker compose up --build`, then **Load and run** in the console, or the command in step 4 |
+
+One honest gap: "outliers" is only covered as numeric min/max plus value shapes in the profile; there is no
+percentile scan per column. Gold reports p50 and p90 for resolution time.
+
 ## How to run
 
 The terminal route, in order. Every step has a console equivalent. Nothing is pre-loaded: the database starts
