@@ -343,31 +343,31 @@ what was recorded.
 
 ### My honest take
 
-**Data Quality Agent: on this file, more trouble than it was worth; on the next file, probably not.** I profiled
-the data and wrote the rules before the agent existed, so it saved no time here. Building it taught me where the
-leverage is: the two findings that mattered most, the duplicates and the swapped columns, are invisible in
-per-column statistics. No model could have found them from the profile I first had; adding three cross-column
-scans to the profiler is what made them visible, and that is plain SQL. So the agent is as good as the profiler
-it reads, and its real value is the second source and the drifted load, where drafting rules with reasons from a
-ready profile is faster than starting cold. I trust it only because every proposal is re-measured by the
-database.
+The Data Quality Agent was more trouble than it was worth on this file. I had profiled the data and written most
+of the rules before it existed, so it didn't save me time, and it cost about $0.50 across 27 model calls. What it
+did do was find 17 of the 18 problems on my checklist, and all 35 proposals it made passed the SQL and row-count
+checks. That number flatters it a little. The two findings that actually mattered, the duplicates and the swapped
+columns, came out of three cross-column scans I added to the profiler, and those scans are plain SQL. A model
+given only per-column summaries would have missed both. So the agent is only as good as the profile it reads. Its
+real use is the next file, where I won't have the rules already written and a proposal with a measured row count
+and a reason beats a blank page. I still wouldn't trust one without the database re-measuring every claim.
 
-**Semantic Classification Agent: low value for categories today, real value for people and hazard.** A
-hand-written lookup covers the 46 category keys exactly, and a lookup on the masked template reproduces the
-category perfectly, so on day one the agent cannot beat what I already had. It earns its place on day two: the
-tests load a second delivery with an unseen spelling, which is flagged, proposed (by a stub model in the test)
-and approved without a code change. Submitter resolution needs knowledge that string matching lacks (Bob is Robert), and a wrong merge is
-costly, which is why those are never auto-applied. The hazard signal is the one output no rule could give me. I
-marked 12 of 66 templates ambiguous while labelling them myself, so on those, agreement with my label is not
-accuracy.
+On classification, categories were a wash. A lookup I wrote by hand covers all 46 category keys, and the agent
+got 44 of 46, with both misses coming back "unknown" for misc and other. At least that is the safe way to fail.
+Submitter resolution did better than I expected: 16 people found out of 16, no false merges and no missed merges.
+That matters more than the category score, because a wrong merge quietly fuses two people's tickets. Hazard
+detection is the part I couldn't have written as a lookup, and it got 96.3% on the 54 templates that aren't
+ambiguous. Two caveats. I labelled the 12 ambiguous templates myself, so agreement there says more about my
+labelling than the model. And it produced 60 distinct issue types for 66 templates, which is closer to a free-text
+summary than a taxonomy. I would tighten that before using it for grouping.
 
-**Where I chose no agent.** Resolution notes follow 11 fixed sentence patterns: regular expressions match all
-8,705, and a model would add cost and variability for nothing. Schema inference (option a) for one 13-column
-file: writing the DDL takes minutes and reviewing generated DDL takes as long; header drift is detected by rule
-instead, and it would start to pay with many sources. Gold design (option d): the gold layer depends on knowing
-which fields can be trusted, and an agent given only the silver schema would reasonably propose resolution-time
-rankings on timestamps that are random. I would trust such an agent for mechanics, such as date spines and
-window functions, and override it on metric definitions and grain.
+I skipped agents where a rule is enough. Resolution notes follow 11 fixed patterns and the regexes match all
+8,705 of them, so a model would add cost and variance for nothing. Schema inference for a single 13-column file
+is the same trade: writing the DDL took me minutes, and reviewing generated DDL would take about as long. Header
+drift is caught by a rule instead, and that is where inference starts to pay, with many sources. Gold design has
+a bigger problem. The useful input is knowing which fields can be trusted, and the timestamps here are random, so
+an agent given only the silver schema would propose sensible mechanics on top of bad assumptions. I would let it
+write date spines and window functions. I wouldn't let it pick the metrics.
 
 ## At 100 times the volume, with daily incremental loads
 
