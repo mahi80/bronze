@@ -1,0 +1,67 @@
+template,category,rows,issue_type,hazard_signal,ambiguous
+Bird droppings on <BLDG> entrance canopy. Looks unprofessional.,Cleaning,165,exterior cleaning,routine,
+"Carpet stain in executive suite, <BLDG>. Need professional cleaning.",Cleaning,165,carpet cleaning,routine,
+Conference room <N> needs deep cleaning before client visit tomorrow.,Cleaning,164,room cleaning,routine,
+Restrooms on <N> floor haven't been serviced today.,Cleaning,161,restroom servicing,routine,
+Spill in <BLDG> lobby. Slip hazard.,Cleaning,152,spill,safety_hazard,
+trash overflowing in kitchen area <BLDG>,Cleaning,177,waste overflow,routine,
+Breaker keeps tripping in server room <N>. Critical — affects production systems.,Electrical,135,breaker tripping,service_outage,
+"Emergency lighting test failed in stairwell A, <BLDG>.",Electrical,31,emergency lighting failure,safety_hazard,
+"Emergency lighting test failed in stairwell B, <BLDG>.",Electrical,20,emergency lighting failure,safety_hazard,
+"Emergency lighting test failed in stairwell C, <BLDG>.",Electrical,28,emergency lighting failure,safety_hazard,
+"Emergency lighting test failed in stairwell North, <BLDG>.",Electrical,25,emergency lighting failure,safety_hazard,
+"Emergency lighting test failed in stairwell South, <BLDG>.",Electrical,21,emergency lighting failure,safety_hazard,
+Half the lights on <N> floor are out. <BLDG>.,Electrical,148,lighting outage,service_outage,
+"Lights flickering in <BLDG>, <N> floor hallway. Has been happening for <N> days.",Electrical,144,lighting fault,routine,
+Power outlet not working at desk <N>. Tried multiple devices.,Electrical,150,outlet fault,routine,
+"Sparking outlet in <BLDG> — DO NOT USE, taped off",Electrical,147,sparking outlet,safety_hazard,
+need more outlets in conf room <N>,Electrical,149,outlet request,routine,
+Elevator <ASSET> stuck between floors <N> and <N>. No one inside (confirmed).,Elevator,203,elevator stuck,service_outage,
+Elevator buttons for floor <N> not responding. <BLDG>.,Elevator,198,elevator controls fault,service_outage,yes
+Elevator making grinding noise. <BLDG> main elevator.,Elevator,177,elevator noise,routine,yes
+Wheelchair-accessible elevator in <BLDG> has expired inspection certificate (noticed today).,Elevator,185,elevator inspection expired,routine,yes
+elevator out of order again <BLDG>,Elevator,167,elevator out of service,service_outage,
+"Emergency exit sign burnt out, <BLDG> <N> floor east stairwell.",Fire Safety,188,exit sign failure,safety_hazard,
+"Fire alarm triggered in <BLDG>, <N> floor. No visible fire. Possible sensor malfunction.",Fire Safety,203,fire alarm activation,safety_hazard,
+"Fire extinguisher expired in hallway near room <N>, <BLDG>.",Fire Safety,203,extinguisher expired,safety_hazard,
+Sprinkler head damaged in <BLDG> storage room <N>. Needs replacement before it leaks.,Fire Safety,197,sprinkler damage,safety_hazard,
+smoke detector beeping <BLDG>,Fire Safety,198,smoke detector fault,safety_hazard,
+"Carpet coming up at seam, trip hazard, <BLDG> <N> floor.",General Maintenance,163,flooring damage,safety_hazard,
+"Ceiling tile falling in <BLDG> hallway, <N> floor. Hazard.",General Maintenance,140,ceiling tile falling,safety_hazard,
+"Door handle broken on room <N>, <BLDG>.",General Maintenance,131,door hardware fault,routine,
+Furniture request — need <N> additional chairs for room <N>.,General Maintenance,128,furniture request,routine,
+Paint peeling in <BLDG> lobby. Looks bad for visitors.,General Maintenance,150,paint repair,routine,
+Parking lot pothole getting larger. Near spot <N>.,General Maintenance,134,pothole,routine,yes
+window cracked <BLDG> <N> floor,General Maintenance,144,window damage,routine,yes
+A/C leaking water onto the carpet near cubicle <N>. <BLDG>.,HVAC,116,ac water leak,routine,yes
+"Heating system making loud banging noises in <BLDG>, <N> floor. Started yesterday.",HVAC,117,heating noise,routine,
+Please check the HVAC — multiple complaints from staff on <N> floor about humidity.,HVAC,100,humidity complaint,routine,
+Temperature control issue in conference room <N>. The thermostat reads <N> degrees but it feels much colder.,HVAC,97,thermostat fault,routine,
+The AC unit on <N> floor is not working. Room temp is around <N>F. Please fix ASAP.,HVAC,116,cooling failure,service_outage,
+Unit <ASSET> cycling on and off every few minutes. Coils might be frozen.,HVAC,115,unit short cycling,routine,
+cold,HVAC,117,temperature complaint,routine,
+hvac broken again in <BLDG>. its really hot,HVAC,126,cooling failure,service_outage,
+Internet extremely slow in <BLDG>. Speed test showing <N> Mbps down.,IT & Network,179,slow internet,service_outage,yes
+Network jack at desk <N> not active. New hire needs connectivity.,IT & Network,202,network port activation,routine,
+Printer on <N> floor not connecting to network. Model HP <ASSET>.,IT & Network,152,printer connectivity,routine,
+VPN issues from <BLDG> conference room. Can't connect to corporate.,IT & Network,181,vpn connectivity,routine,
+"WiFi down on <N> floor, <BLDG>. Multiple users affected.",IT & Network,161,wifi outage,service_outage,
+wifi password not working,IT & Network,135,wifi access,routine,
+"Ant infestation in <BLDG>, <N> floor break room. Getting worse.",Pest Control,201,ant infestation,routine,
+Cockroach sighting in <BLDG> restroom. Third report this month.,Pest Control,207,cockroach sighting,routine,
+Mice spotted in <BLDG> kitchen area. Droppings found in cabinets.,Pest Control,190,rodent sighting,routine,yes
+"Wasp nest forming on <BLDG> exterior, near entrance.",Pest Control,206,wasp nest,safety_hazard,
+bugs in office <BLDG>,Pest Control,239,insect sighting,routine,
+"Drain clogged in janitor closet, <N> floor.",Plumbing,132,clogged drain,routine,
+Faucet in <BLDG> kitchen won't turn off completely. Constant drip.,Plumbing,140,dripping faucet,routine,
+Hot water not working in <BLDG>. Multiple sinks affected.,Plumbing,146,hot water outage,service_outage,
+Toilet in <N> floor men's restroom is overflowing. Urgent.,Plumbing,178,toilet overflow,service_outage,
+"Water leak detected in ceiling tiles, <BLDG> room <N>. Appears to be coming from above.",Plumbing,156,ceiling water leak,service_outage,yes
+pipe burst,Plumbing,149,pipe burst,service_outage,
+water everywhere in bathroom <BLDG>,Plumbing,125,bathroom flooding,service_outage,
+Badge reader at <BLDG> main entrance not working. Staff can't get in.,Security & Access,161,badge reader outage,service_outage,
+Door <N> won't lock. Handle mechanism seems broken.,Security & Access,171,door lock fault,routine,yes
+Need access card programmed for new employee starting Monday. <BLDG> <N> floor.,Security & Access,162,access card request,routine,
+Security camera <ASSET> offline since yesterday. Covers parking lot sector <N>.,Security & Access,192,camera offline,service_outage,
+Tailgating incident reported at <BLDG> loading dock. Review camera footage.,Security & Access,176,tailgating incident,routine,yes
+alarm going off <BLDG> no apparent reason,Security & Access,154,unexplained alarm,routine,yes

@@ -1,0 +1,224 @@
+# The silver cleaning rules: what each one does, why it exists, and how its effect is measured.
+# The logic lives in sql/00_schemas.sql (hard checks, parsers) and sql/20_silver.sql. After every silver
+# build the pipeline runs each `measure` query and stores the result in ops.dq_results, so the documented
+# rule and the measured effect cannot drift apart. `scope` is the denominator: bronze or silver.
+- id: R01
+  title: Quarantine rows that fail a hard check
+  rule: >-
+    A row with no valid ticket ID, no parseable created date, no valid status or no valid building goes to
+    silver.tickets_rejected with every reason listed.
+  why: >-
+    These are test and placeholder entries. On this file every one of them fails at least three checks, which is
+    good evidence that the rule does not catch real tickets. Rejecting to a table keeps them auditable.
+  scope: bronze
+  measure: SELECT count(*) FROM silver.tickets_rejected
+- id: R02
+  title: Repair swapped category and description
+  rule: When category is not a known label and description is, swap the two and flag swapped_columns.
+  why: Deterministic and reversible, and it recovers the category of tickets that would otherwise be unclassified.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE 'swapped_columns' = ANY (dq_flags)
+- id: R03
+  title: Flag re-keyed duplicates
+  rule: >-
+    Rows identical on category, priority, status, building, description, resolved_at, assigned_to,
+    resolution_notes, cost and sla_hours are duplicates. The comparison runs after the swap repair. The lowest
+    ticket number survives; the others get is_duplicate and duplicate_of. Gold reads silver.tickets_current,
+    which leaves them out.
+  why: The same ticket was entered again under a new ID. Flagging keeps the evidence; deleting would not.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE is_duplicate
+- id: R03a
+  title: Mark duplicates matched on sparse fields as weak
+  rule: A duplicate with no resolved_at, no cost and no notes is marked dup_match_strength = weak.
+  why: Ten matching fields are weaker evidence when three of them are empty. A reviewer should see these first.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE dup_match_strength = 'weak'
+- id: R03b
+  title: Match truncated swapped rows to their original by prefix
+  rule: >-
+    A swapped row whose text was cut at 60 characters is a duplicate when another ticket matches the other
+    nine fields and its description starts with the truncated text. It gets dup_match_strength =
+    truncated_prefix and the flag description_truncated.
+  why: >-
+    The swap lost text in the source system, so these rows can never match exactly. Finding the longer
+    original both identifies the duplicate and proves the truncation, and the full text survives on the
+    original.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE dup_match_strength = 'truncated_prefix'
+- id: R04
+  title: ticket_id must be TKT- followed by digits
+  rule: Rows that fail are quarantined by R01 with reason invalid_ticket_id.
+  why: It is the business key of the silver table.
+  scope: bronze
+  measure: SELECT count(*) FROM silver.tickets_rejected WHERE 'invalid_ticket_id' = ANY (reasons)
+- id: R05
+  title: Parse created_at from eight registered formats
+  rule: >-
+    Eight explicit patterns, month-first for the US formats. Epoch seconds are converted to the source time
+    zone, UTC by default. The source format and the precision (second, minute, day) are recorded. The count
+    is values that were not already ISO date-time.
+  why: >-
+    A permissive parser guesses day and month order without telling anyone. Explicit patterns fail loudly on a
+    new format, and that failure is the trigger for a drift review.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE created_at_format NOT IN ('iso_t', 'iso_space')
+- id: R05a
+  title: Parse resolved_at with the same parser
+  rule: Blank stays NULL. The count is resolved_at values that parsed.
+  why: Same reasoning as R05.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE resolved_at IS NOT NULL
+- id: R06
+  title: Flag resolved_at earlier than created_at
+  rule: >-
+    Compared by date when either value has day precision. Both values are kept, the flag
+    resolved_before_created is added and resolution_hours stays empty.
+  why: >-
+    The pipeline cannot know which timestamp is wrong. Correcting or dropping would invent data, and a negative
+    duration would corrupt every average.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE 'resolved_before_created' = ANY (dq_flags)
+- id: R07
+  title: Flag a resolved_at on a ticket that is still open
+  rule: Status is not Resolved or Closed but resolved_at is filled. Flag only.
+  why: Either field could be the wrong one, so the contradiction is surfaced for the owner of the source.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE 'resolved_at_on_open_ticket' = ANY (dq_flags)
+- id: R07a
+  title: Flag a closed ticket with no resolved_at
+  rule: Status is Resolved or Closed but resolved_at is empty. Flag only.
+  why: Same reasoning as R07.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE 'terminal_without_resolved_at' = ANY (dq_flags)
+- id: R08
+  title: Standardise category through silver.category_map
+  rule: >-
+    Each raw spelling maps to one of ten standard categories. The raw value is kept in category_raw. The count
+    is rows whose value changed.
+  why: >-
+    A lookup table is transparent, versioned and extendable without a code change. The classification agent
+    proposes new rows and a person approves them.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE category_std <> 'Unclassified' AND category_raw IS DISTINCT FROM category_std
+- id: R08a
+  title: Categories with no approved mapping become Unclassified
+  rule: The row is kept, labelled Unclassified and flagged category_unmapped.
+  why: A new spelling must never block the load or be guessed silently.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE 'category_unmapped' = ANY (dq_flags)
+- id: R09
+  title: Standardise priority through silver.priority_map
+  rule: Maps to Critical, High, Medium or Low. Normal maps to Medium. The count is rows whose value changed.
+  why: Normal is the one judgement call and is listed as an assumption in the README.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE priority_std IS NOT NULL AND priority_raw IS DISTINCT FROM priority_std
+- id: R09a
+  title: Missing priority stays missing
+  rule: Blank priority becomes NULL and is flagged priority_missing. It is not imputed.
+  why: Nothing in the file predicts priority, so imputing it would fabricate a field that drives SLA reporting.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE 'priority_missing' = ANY (dq_flags)
+- id: R10
+  title: Resolve submitter spellings through silver.person_map
+  rule: Each spelling maps to a person ID and a display name. The count is rows whose name changed.
+  why: >-
+    Without it most people appear as two or three different submitters. A merge is a decision about identity,
+    so every one needs a person's approval.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE submitter_name IS NOT NULL AND submitted_by_raw IS DISTINCT FROM submitter_name
+- id: R10a
+  title: Submitters with no approved mapping are flagged
+  rule: The raw name is kept, submitter_id stays NULL and the row is flagged submitter_unmapped.
+  why: An unreviewed merge is worse than a missing one.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE 'submitter_unmapped' = ANY (dq_flags)
+- id: R11
+  title: Cost placeholders become NULL with a reason
+  rule: >-
+    The currency symbol is removed and the value cast to numeric(12,2). N/A, TBD and blank become NULL with
+    cost_status not_applicable, pending or missing. -1 becomes NULL with status unknown. Zero is kept.
+    The count is rows without a usable cost.
+  why: >-
+    A placeholder left in a numeric column lowers every average. Keeping the reason preserves the difference
+    between "not yet known" and "no cost applies".
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE cost_status <> 'known'
+- id: R11a
+  title: Sentinel cost values (-1) are flagged
+  rule: A cost that is present but negative or not numeric gets cost_placeholder.
+  why: Distinguishes a deliberate sentinel from a blank.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE 'cost_placeholder' = ANY (dq_flags)
+- id: R12
+  title: SLA placeholders (999, 0) become NULL
+  rule: sla_hours must be 4, 8, 24, 48 or 72. Any other value becomes NULL with sla_status placeholder.
+  why: >-
+    A 999-hour or 0-hour SLA is not a commitment anyone can be measured against. Left in, it makes a ticket
+    pass or fail by construction.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE sla_status = 'placeholder'
+- id: R12a
+  title: SLA not set (blank or N/A)
+  rule: Becomes NULL with sla_status not_set. Not imputed from priority.
+  why: SLA hours are independent of priority in this file, so there is nothing to impute from.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE sla_status = 'not_set'
+- id: R13
+  title: Extract attributes from resolution notes by pattern
+  rule: >-
+    Eleven regular expressions set note_type and extract root cause, replaced part, hours on site, parts ETA,
+    scheduled weekday, resolver and duplicate reference. The count is notes that matched a pattern.
+  why: The notes follow fixed sentence patterns. A model here would add cost and variability for no gain.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE note_type IS NOT NULL AND note_type <> 'other'
+- id: R13a
+  title: Notes that match no pattern
+  rule: note_type is set to other. A rise here means the note vocabulary has changed.
+  why: The guard that tells us when the regular expressions stop being enough.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE note_type = 'other'
+- id: R14
+  title: Issue type and hazard signal from the description template
+  rule: >-
+    Numbers, the building name and asset IDs are masked; the resulting template is looked up in
+    silver.issue_map, which the classification agent fills and a person approves. Floor, room and asset
+    identifiers are extracted by regular expression. The count is rows with an issue type.
+  why: The identifiers are pattern-shaped. The judgement about hazard is not.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE issue_type IS NOT NULL
+- id: R15
+  title: Trim and collapse whitespace
+  rule: Every text column is trimmed and repeated spaces collapsed. The count is rows where that changed a value.
+  why: Prevents false distinct values.
+  scope: bronze
+  measure: >-
+    SELECT count(*) FROM bronze.tickets_raw
+    WHERE ticket_id || category || priority || status || building || submitted_by || assigned_to
+          ~ '^\s|\s$|\s{2,}'
+       OR category ~ '^\s|\s$' OR priority ~ '^\s|\s$' OR status ~ '^\s|\s$' OR building ~ '^\s|\s$'
+       OR submitted_by ~ '^\s|\s$' OR assigned_to ~ '^\s|\s$' OR description ~ '^\s|\s$'
+- id: R16
+  title: Blank assignee becomes NULL and is not backfilled
+  rule: assigned_to is never filled from "Resolved by" notes.
+  why: Where both exist, the note and the column disagree far more often than they agree.
+  scope: silver
+  measure: SELECT count(*) FROM silver.tickets WHERE assigned_to IS NULL
+- id: R17
+  title: 'Guard: building named in the description equals the building column'
+  rule: Counts descriptions that name a different building than the ticket's own. Expected to be zero.
+  why: Costs almost nothing and will catch a mis-keyed building or a future column swap.
+  scope: silver
+  measure: >-
+    SELECT count(*) FROM silver.tickets t
+    WHERE EXISTS (SELECT 1 FROM (SELECT DISTINCT building FROM silver.tickets) b
+                  WHERE b.building <> t.building AND position(b.building IN t.description) > 0)
+- id: R17a
+  title: 'Guard: each description template belongs to one category'
+  rule: Counts rows whose template appears under more than one standard category. Expected to be zero.
+  why: Category and description agree perfectly today; this notices when they stop.
+  scope: silver
+  measure: >-
+    SELECT coalesce(sum(n), 0) FROM (
+      SELECT count(*) AS n FROM silver.tickets WHERE description_template IS NOT NULL
+      GROUP BY description_template HAVING count(DISTINCT category_std) > 1) x

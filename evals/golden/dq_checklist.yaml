@@ -1,0 +1,93 @@
+# The 18 data problems found by manual profiling. The Data Quality Agent is scored on how many it rediscovers.
+# A problem counts as found when validated proposals either
+#   rowset : together cover at least min_recall of the known affected rows, counting only proposals that name one of
+#            the listed columns and whose own rows fall at least 90% inside the known set (so a rule that matches
+#            everything, or that hits the same rows for another reason, earns nothing), or
+#   keyword: touch one of the listed columns and mention one of the keywords in the finding.
+# Row sets are objective; keywords are a fallback for problems that are not a set of rows.
+- id: invalid_ticket_id
+  problem: Ticket IDs that are not TKT- followed by digits
+  rowset: "ticket_id !~ '^TKT-[0-9]+$'"
+  min_recall: 0.8
+  columns: [ticket_id]
+- id: timestamp_formats
+  problem: created_at and resolved_at arrive in eight formats
+  columns: [created_at, resolved_at]
+  keywords: [format, iso, parse, mixed, standardi, inconsistent]
+- id: junk_date_tokens
+  problem: created_at holds words, zero dates and blanks
+  rowset: "created_at IN ('asap', 'TBD', 'not a date', '00/00/0000', '')"
+  min_recall: 0.6
+  columns: [created_at]
+- id: epoch_seconds
+  problem: Some timestamps are Unix epoch seconds
+  rowset: "created_at ~ '^[0-9]{10}$' OR resolved_at ~ '^[0-9]{10}$'"
+  min_recall: 0.6
+  columns: [created_at, resolved_at]
+  keywords: [epoch, unix]
+- id: reversed_timestamps
+  problem: resolved_at earlier than created_at
+  columns: [resolved_at, created_at]
+  keywords: [before, earlier, precede, reversed, negative, prior to]
+- id: status_resolved_contradiction
+  problem: Open tickets with a resolved_at, closed tickets without one
+  columns: [status, resolved_at]
+  keywords: [open, closed, terminal, contradict, inconsistent, unresolved]
+- id: category_synonyms
+  problem: 62 spellings of 10 categories
+  columns: [category]
+  keywords: [synonym, variant, spelling, case, standardi, canonical, map, inconsistent]
+- id: swapped_columns
+  problem: Category and description swapped on 50 rows
+  rowset: "lower(btrim(description)) IN ('a/c', 'ac', 'access control', 'air conditioning', 'badge/access', 'cleaning', 'climate control', 'connectivity', 'elec', 'electrical', 'electrical systems', 'elevator', 'elevator/escalator', 'exterminator', 'fire alarm', 'fire safety', 'fire/safety', 'general', 'general maintenance', 'heating cooling', 'heating/cooling', 'housekeeping', 'hvac', 'hvac system', 'it', 'it support', 'it/network', 'janitorial', 'lift', 'maintenance', 'misc', 'network', 'other', 'pest', 'pest control', 'plumbing', 'plumbing issue', 'power', 'power issue', 'security', 'security systems', 'sprinkler', 'vertical transport', 'water issue', 'water/plumbing', 'wifi')"
+  min_recall: 0.7
+  columns: [category, description]
+  keywords: [swap, transpos, wrong column, misplaced]
+- id: priority_variants
+  problem: 17 spellings of 4 priority levels, and blanks
+  columns: [priority]
+  keywords: [case, variant, spelling, synonym, standardi, abbrevi, inconsistent, blank, missing]
+- id: junk_status_building
+  problem: Placeholder values in status and building
+  rowset: "status IN ('NULL', 'unknown', '???', '') OR building IN ('???', 'unknown', 'test building', '')"
+  min_recall: 0.6
+  columns: [status, building]
+- id: submitter_variants
+  problem: 33 spellings of 16 people
+  columns: [submitted_by]
+  keywords: [variant, spelling, case, initial, same person, normali, standardi, inconsistent]
+- id: cost_currency_prefix
+  problem: Currency symbol on some cost values
+  rowset: "cost LIKE '$%'"
+  min_recall: 0.8
+  columns: [cost]
+  keywords: [currency, dollar]
+- id: cost_placeholders
+  problem: Cost placeholders -1, N/A, TBD
+  rowset: "cost IN ('-1', 'N/A', 'TBD', '-999', 'error', 'NULL')"
+  min_recall: 0.5
+  columns: [cost]
+- id: sla_placeholders
+  problem: SLA placeholders 999, 0, N/A
+  rowset: "sla_hours IN ('999', '0', '-1', 'N/A', 'NULL')"
+  min_recall: 0.4
+  columns: [sla_hours]
+- id: duplicated_content
+  problem: The same ticket entered again under a new ID
+  actions: [deduplicate]
+  columns: [ticket_id, created_at, submitted_by, description]
+  keywords: [duplicate, identical, same ticket, re-entered, repeated]
+- id: test_rows
+  problem: Test and placeholder rows
+  rowset: "status NOT IN ('Open', 'In Progress', 'Pending Vendor', 'Escalated', 'Resolved', 'Closed')"
+  min_recall: 0.6
+  columns: [description, submitted_by, status, building, category]
+  keywords: [test, placeholder, junk, dummy]
+- id: truncated_text
+  problem: Text cut at exactly 60 characters
+  columns: [category, description]
+  keywords: [truncat, cut off, 60 char, max_length, maximum length]
+- id: padded_whitespace
+  problem: Leading or trailing whitespace
+  columns: [category]
+  keywords: [whitespace, trim, padding, padded, trailing, leading]

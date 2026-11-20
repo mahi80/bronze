@@ -1,0 +1,87 @@
+# docker compose up --build      starts PostgreSQL, then runs bronze -> silver -> gold once
+# docker compose run --rm pipeline <command>      any other command (see README)
+# docker compose --profile console up --build     the same, plus the optional operator console on http://localhost:3000
+
+x-pipeline-environment: &pipeline-environment
+  DATABASE_URL: postgresql://medallion:medallion@postgres:5432/medallion
+  SOURCE_TZ: ${SOURCE_TZ:-UTC}
+  APPROVER: ${APPROVER:-reviewer}
+  # agents are optional; values come from .env (see .env.example)
+  LLM_PROVIDER: ${LLM_PROVIDER:-none}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-}
+  LLM_MODEL_STRONG: ${LLM_MODEL_STRONG:-}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0}
+  LLM_TOKEN_BUDGET: ${LLM_TOKEN_BUDGET:-400000}
+  LLM_PRICE_IN: ${LLM_PRICE_IN:-}
+  LLM_PRICE_OUT: ${LLM_PRICE_OUT:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: medallion
+      POSTGRES_PASSWORD: medallion
+      POSTGRES_DB: medallion
+    ports:
+      - "5433:5432"          # psql -h localhost -p 5433 -U medallion medallion
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medallion -d medallion"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  pipeline:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *pipeline-environment
+    volumes:
+      - ./data:/app/data:ro              # the supplied file is never modified
+      - ./rules:/app/rules               # approved mappings can be exported back for review
+      - ./reports:/app/reports
+      - ./evals/recordings:/app/evals/recordings
+      - ./docs:/app/docs                 # `prompts` rewrites docs/prompt_preview.md
+      - ./README.md:/app/README.md       # `report --update-readme` refreshes the results block in place
+
+  # ---- optional operator console (profile "console"): an API over the pipeline, and the web console that calls it
+  api:
+    profiles: [console]
+    build: .
+    entrypoint: ["uvicorn", "pipeline.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *pipeline-environment
+      CONSOLE_API_TOKEN: ${CONSOLE_API_TOKEN:-local-console-token}
+    volumes:
+      - ./data:/app/data:ro
+      - ./rules:/app/rules
+      - ./reports:/app/reports
+      - ./evals/recordings:/app/evals/recordings
+    healthcheck:                         # not published to the host: only the console talks to it
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  console:
+    profiles: [console]
+    build: ./console
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      PIPELINE_API_URL: http://api:8000
+      CONSOLE_API_TOKEN: ${CONSOLE_API_TOKEN:-local-console-token}
+      CONSOLE_ORIGIN: ${CONSOLE_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
+    ports:
+      - "127.0.0.1:3000:3000"            # this machine only
+
+volumes:
+  pgdata:

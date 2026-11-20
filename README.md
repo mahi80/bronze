@@ -1,0 +1,446 @@
+# Support tickets: a medallion pipeline with two agents
+
+A bronze → silver → gold pipeline over `data/raw_tickets.csv` (10,280 messy operational support tickets), in
+PostgreSQL, with two AI agents that help build and maintain the silver layer.
+
+The design rule is one sentence: **agents propose, code checks, a person approves, and the pipeline then runs as
+plain SQL.** No model call sits in the row-by-row path, so the pipeline is deterministic, re-runnable, and works
+with no API key at all.
+
+| | |
+|---|---|
+| Result on the supplied file | 10,280 raw rows → 30 quarantined → 10,250 valid tickets → 250 duplicates flagged → **10,000 unique tickets** |
+| Run time | two to three seconds for bronze, silver and gold on this file |
+| Tests | 75, against a real PostgreSQL (`pytest`) |
+| Agents | Data Quality Agent (option b) and Semantic Classification Agent (option c) |
+
+## How to run
+
+```bash
+docker compose up --build        # starts PostgreSQL, then runs bronze -> silver -> gold once
+```
+
+That is everything needed for the pipeline. The pipeline container exits when the run completes and PostgreSQL
+keeps running. The other commands:
+
+```bash
+docker compose run --rm pipeline run                 # run again: idempotent, changes nothing
+docker compose run --rm --entrypoint pytest pipeline -q   # the test suite
+psql -h localhost -p 5433 -U medallion medallion     # password: medallion
+
+# agents (need a provider: copy .env.example to .env and fill it in)
+docker compose run --rm pipeline evals               # score both agents against the golden sets
+docker compose run --rm pipeline report --update-readme   # write reports/agent_report.md and refresh this file
+docker compose run --rm pipeline agents classify     # propose mappings for values not seen before
+docker compose run --rm pipeline agents dq           # propose rules from the bronze profile
+docker compose run --rm pipeline proposals           # what is waiting for a person
+docker compose run --rm pipeline approve --task category --key aircon --set HVAC
+docker compose run --rm pipeline prompts             # write the exact prompts, without calling a model
+
+# optional: the same, plus a web console on http://localhost:3000 (see "Operator console")
+docker compose --profile console up --build
+```
+
+Without Docker: `pip install -r requirements.txt`, set `DATABASE_URL`, then `python -m pipeline run`.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    F["data/raw_tickets.csv"] --> B[("bronze.tickets_raw<br/>text as-is + lineage")]
+    B --> S[("silver.tickets<br/>typed, standardised, flagged")]
+    B --> R[("silver.tickets_rejected")]
+    S --> G[("gold: 3 models")]
+    B -. "column profile" .-> DQ["Data Quality Agent"]
+    B -. "distinct values" .-> SC["Semantic Classification Agent"]
+    DQ -- "rule proposals" --> V{"automatic checks<br/>+ approval"}
+    SC -- "mapping proposals" --> V
+    V -- "approved" --> M[("mapping tables,<br/>approved checks")]
+    M --> S
+```
+
+A static version is in `docs/architecture.png`. Everything lives in one PostgreSQL database with one schema per
+layer, plus `ops` for run metadata.
+
+| Schema | Holds | Naming |
+|---|---|---|
+| `bronze` | `tickets_raw`: every source column as text, exactly as delivered | lineage columns start with `_` |
+| `silver` | `tickets`, `tickets_rejected`, the mapping tables, the view `tickets_current` | `_std` standardised, `_raw` original, `is_...` flags, `dq_flags` array |
+| `gold` | three aggregate tables named for subject and grain | every row carries `_run_id` |
+| `ops` | run and stage log, rule effects, lineage, alerts, agent calls, proposals, evaluations | |
+
+Choices, briefly: PostgreSQL because the brief suggests it and transactions make idempotent loads simple. SQL
+files run by a small Python tool because a reviewer can read exactly what each layer does. No dbt, Airflow or
+agent framework: three linear stages and single-purpose model calls do not need them. I would add dbt and a
+scheduler at production scale (see "At 100 times the volume").
+
+## What the data contains
+
+Every number here is measured by the pipeline, not estimated.
+
+- **Eight timestamp formats**, including Unix epoch seconds, plus junk such as `asap`, `TBD`, `00/00/0000`. The
+  three US-style formats are month-first: the first component never exceeds 12.
+- **62 spellings of 10 categories**, 17 spellings of 4 priorities, 33 spellings of 16 submitters.
+- **30 placeholder rows** ("IGNORE THIS ROW", "asdfasdfasdf"). Each fails at least three hard checks.
+- **50 rows with category and description swapped.** All 50 are copies of earlier tickets; 24 lost their text
+  beyond 60 characters in the swap.
+- **250 duplicates**: 200 re-keyed copies that differ only in ticket ID, created date and submitter, and the 50
+  swapped copies. Removing them leaves exactly the 10,000 tickets numbered 1000 to 10999.
+- **Placeholders in numeric fields**: cost `-1`, `N/A`, `TBD`, `$` prefixes; SLA `999`, `0`, `N/A`.
+
+### What the data cannot support
+
+Before choosing rules and gold models I tested whether fields relate the way a real ticketing system would make
+them. Several do not, and I would rather say so than build metrics that only look meaningful.
+
+| Relationship | What the file shows | Consequence |
+|---|---|---|
+| resolved after created | 1,865 of 5,319 tickets with both timestamps (35%) are resolved before they were created. Valid intervals have a median of about 195 days against SLAs of 4 to 72 hours | Flag, never correct. Durations only where the order is valid |
+| tickets meet their SLA | Of 10,000 unique tickets, 2,003 have a valid interval and a real SLA; 8 of those meet it | Gold publishes coverage beside every rate |
+| status agrees with resolved_at | 2,127 open tickets carry a resolved_at; 100 closed tickets have none | Two flags, no automatic fix |
+| assignee depends on category | Every assignee handles every category at 8% to 12% of its tickets | No "misrouted ticket" rule |
+| SLA hours depend on priority | Each SLA value appears at 18% to 22% under every priority | Missing SLA is not imputed |
+| priority reflects urgency in the text | 1,922 tickets carry a safety-hazard label; 580 of them (30%) are Low or have no priority, about the same share as all tickets (31%) | Missing priority stays missing; a hazard signal is derived from the text instead |
+| category agrees with description | Every description template belongs to exactly one category | Reliable, and a free labelled set for evaluation |
+
+These look like the output of a generator that draws fields independently. I treat that as a property of the
+file: the pipeline keeps what was received, flags what cannot be true, and avoids rules that would pretend
+otherwise. In a real engagement these rows are the first thing I would take to the data owner.
+
+## Bronze
+
+`bronze.tickets_raw` holds the 13 source columns as text, exactly as delivered: an empty field stays an empty
+string, and `NULL`, `N/A` and `???` stay as text. Interpretation is silver's job. Lineage metadata on every row:
+`_source_file`, `_file_sha256`, `_source_row_number`, `_ingested_at`, `_batch_id`, `_row_hash` (SHA-256 of the 13
+fields) and `_dup_seq` (the nth occurrence of identical content within a file).
+
+- A file whose hash is in `ops.file_manifest` is skipped. Running the same command twice inserts nothing.
+- Rows are inserted under a uniqueness rule on (`_row_hash`, `_dup_seq`), so an overlapping file adds only new
+  content, while two identical lines in one file are both kept. That is how "dedup tracking" and "no data loss"
+  hold together.
+- A file whose header differs from the registered one is not loaded. The difference is recorded in
+  `ops.drift_event` and the run fails with a message naming the added and missing columns.
+- The source file is mounted read-only.
+
+A test compares the row hashes in bronze with hashes computed from the CSV: they are identical.
+
+## Silver
+
+`silver.tickets` has one row per valid ticket: typed, standardised, flagged, with the raw value kept beside
+every standardised one. `silver.tickets_rejected` is the quarantine. `silver.tickets_current` is the view gold
+reads: the same table without flagged duplicates. Three kinds of logic, in order of preference:
+
+1. **Deterministic SQL** for everything pattern-shaped: timestamps, placeholders, resolution notes, swaps,
+   duplicates.
+2. **Mapping tables** (`category_map`, `priority_map`, `person_map`, `issue_map`) for everything that is a
+   vocabulary. Each row records the decision, who or what proposed it, the confidence and who approved it.
+3. **A model**, only to propose rows for those mapping tables.
+
+The mappings shipped in `rules/*.csv` are the baseline I labelled by hand while profiling (`source = seed`), so
+the pipeline output is complete without a model, and every figure in this README comes from them. Agent
+proposals are added through the approval gate, and `export-rules` writes approvals back to those files, so an
+approval becomes a reviewable commit.
+
+### Cleaning rules and why
+
+The rules are documented in `rules/cleaning_rules.yaml`. After every build the pipeline measures the effect of
+each rule and stores it in `ops.dq_results`, so the documentation and the behaviour cannot drift apart. "Rows"
+is the measured effect on the supplied file.
+
+| ID | Rule | Rows | Why |
+|---|---|---:|---|
+| R01 | **Quarantine rows that fail a hard check.** A row with no valid ticket ID, no parseable created date, no valid status or no valid building goes to silver.tickets_rejected with every reason listed. | 30 | These are test and placeholder entries. On this file every one of them fails at least three checks, which is good evidence that the rule does not catch real tickets. Rejecting to a table keeps them auditable. |
+| R02 | **Repair swapped category and description.** When category is not a known label and description is, swap the two and flag swapped_columns. | 50 | Deterministic and reversible, and it recovers the category of tickets that would otherwise be unclassified. |
+| R03 | **Flag re-keyed duplicates.** Rows identical on category, priority, status, building, description, resolved_at, assigned_to, resolution_notes, cost and sla_hours are duplicates. The comparison runs after the swap repair. The lowest ticket number survives; the others get is_duplicate and duplicate_of. Gold reads silver.tickets_current, which leaves them out. | 250 | The same ticket was entered again under a new ID. Flagging keeps the evidence; deleting would not. |
+| R03a | **Mark duplicates matched on sparse fields as weak.** A duplicate with no resolved_at, no cost and no notes is marked dup_match_strength = weak. | 3 | Ten matching fields are weaker evidence when three of them are empty. A reviewer should see these first. |
+| R03b | **Match truncated swapped rows to their original by prefix.** A swapped row whose text was cut at 60 characters is a duplicate when another ticket matches the other nine fields and its description starts with the truncated text. It gets dup_match_strength = truncated_prefix and the flag description_truncated. | 24 | The swap lost text in the source system, so these rows can never match exactly. Finding the longer original both identifies the duplicate and proves the truncation, and the full text survives on the original. |
+| R04 | **ticket_id must be TKT- followed by digits.** Rows that fail are quarantined by R01 with reason invalid_ticket_id. | 26 | It is the business key of the silver table. |
+| R05 | **Parse created_at from eight registered formats.** Eight explicit patterns, month-first for the US formats. Epoch seconds are converted to the source time zone, UTC by default. The source format and the precision (second, minute, day) are recorded. The count is values that were not already ISO date-time. | 5,605 | A permissive parser guesses day and month order without telling anyone. Explicit patterns fail loudly on a new format, and that failure is the trigger for a drift review. |
+| R05a | **Parse resolved_at with the same parser.** Blank stays NULL. The count is resolved_at values that parsed. | 5,319 | Same reasoning as R05. |
+| R06 | **Flag resolved_at earlier than created_at.** Compared by date when either value has day precision. Both values are kept, the flag resolved_before_created is added and resolution_hours stays empty. | 1,865 | The pipeline cannot know which timestamp is wrong. Correcting or dropping would invent data, and a negative duration would corrupt every average. |
+| R07 | **Flag a resolved_at on a ticket that is still open.** Status is not Resolved or Closed but resolved_at is filled. Flag only. | 2,127 | Either field could be the wrong one, so the contradiction is surfaced for the owner of the source. |
+| R07a | **Flag a closed ticket with no resolved_at.** Status is Resolved or Closed but resolved_at is empty. Flag only. | 100 | Same reasoning as R07. |
+| R08 | **Standardise category through silver.category_map.** Each raw spelling maps to one of ten standard categories. The raw value is kept in category_raw. The count is rows whose value changed. | 8,910 | A lookup table is transparent, versioned and extendable without a code change. The classification agent proposes new rows and a person approves them. |
+| R08a | **Categories with no approved mapping become Unclassified.** The row is kept, labelled Unclassified and flagged category_unmapped. | 0 | A new spelling must never block the load or be guessed silently. |
+| R09 | **Standardise priority through silver.priority_map.** Maps to Critical, High, Medium or Low. Normal maps to Medium. The count is rows whose value changed. | 7,006 | Normal is the one judgement call and is listed as an assumption in the README. |
+| R09a | **Missing priority stays missing.** Blank priority becomes NULL and is flagged priority_missing. It is not imputed. | 1,078 | Nothing in the file predicts priority, so imputing it would fabricate a field that drives SLA reporting. |
+| R10 | **Resolve submitter spellings through silver.person_map.** Each spelling maps to a person ID and a display name. The count is rows whose name changed. | 5,820 | Without it most people appear as two or three different submitters. A merge is a decision about identity, so every one needs a person's approval. |
+| R10a | **Submitters with no approved mapping are flagged.** The raw name is kept, submitter_id stays NULL and the row is flagged submitter_unmapped. | 0 | An unreviewed merge is worse than a missing one. |
+| R11 | **Cost placeholders become NULL with a reason.** The currency symbol is removed and the value cast to numeric(12,2). N/A, TBD and blank become NULL with cost_status not_applicable, pending or missing. -1 becomes NULL with status unknown. Zero is kept. The count is rows without a usable cost. | 3,798 | A placeholder left in a numeric column lowers every average. Keeping the reason preserves the difference between "not yet known" and "no cost applies". |
+| R11a | **Sentinel cost values (-1) are flagged.** A cost that is present but negative or not numeric gets cost_placeholder. | 192 | Distinguishes a deliberate sentinel from a blank. |
+| R12 | **SLA placeholders (999, 0) become NULL.** sla_hours must be 4, 8, 24, 48 or 72. Any other value becomes NULL with sla_status placeholder. | 1,041 | A 999-hour or 0-hour SLA is not a commitment anyone can be measured against. Left in, it makes a ticket pass or fail by construction. |
+| R12a | **SLA not set (blank or N/A).** Becomes NULL with sla_status not_set. Not imputed from priority. | 3,065 | SLA hours are independent of priority in this file, so there is nothing to impute from. |
+| R13 | **Extract attributes from resolution notes by pattern.** Eleven regular expressions set note_type and extract root cause, replaced part, hours on site, parts ETA, scheduled weekday, resolver and duplicate reference. The count is notes that matched a pattern. | 8,705 | The notes follow fixed sentence patterns. A model here would add cost and variability for no gain. |
+| R13a | **Notes that match no pattern.** note_type is set to other. A rise here means the note vocabulary has changed. | 0 | The guard that tells us when the regular expressions stop being enough. |
+| R14 | **Issue type and hazard signal from the description template.** Numbers, the building name and asset IDs are masked; the resulting template is looked up in silver.issue_map, which the classification agent fills and a person approves. Floor, room and asset identifiers are extracted by regular expression. The count is rows with an issue type. | 10,138 | The identifiers are pattern-shaped. The judgement about hazard is not. |
+| R15 | **Trim and collapse whitespace.** Every text column is trimmed and repeated spaces collapsed. The count is rows where that changed a value. | 1 | Prevents false distinct values. |
+| R16 | **Blank assignee becomes NULL and is not backfilled.** assigned_to is never filled from "Resolved by" notes. | 3,092 | Where both exist, the note and the column disagree far more often than they agree. |
+| R17 | **Guard: building named in the description equals the building column.** Counts descriptions that name a different building than the ticket's own. Expected to be zero. | 0 | Costs almost nothing and will catch a mis-keyed building or a future column swap. |
+| R17a | **Guard: each description template belongs to one category.** Counts rows whose template appears under more than one standard category. Expected to be zero. | 0 | Category and description agree perfectly today; this notices when they stop. |
+
+Two things the implementation found that profiling alone had not:
+
+- Comparing rows *after* the swap repair shows that the swapped rows are themselves copies of earlier tickets.
+  Rule R03b matches the truncated ones to their original by prefix. The result is exactly 10,000 unique tickets,
+  which is strong evidence that the duplicate rules are neither too loose nor too tight.
+- One swapped description is naturally 60 characters long. A length rule alone would have called it truncated;
+  requiring a longer original to exist avoids that.
+
+Each run asserts `bronze = silver + rejected + superseded` and fails otherwise ("superseded" is an older delivery
+of a ticket that a later file replaced).
+
+## Gold
+
+Gold reads only `silver.tickets_current`. Each model is rebuilt in one transaction per run, and a check asserts
+that every ticket is counted exactly once in each.
+
+| Model | Grain | Why this model |
+|---|---|---|
+| `gold.sla_performance_monthly` | month × category × priority | SLA attainment is the first question asked of a ticketing system. It reports median and 90th-percentile resolution hours and the share within SLA, with **coverage beside the rate**: here only 2,003 of 10,000 tickets are measurable and 8 meet their SLA, which is a finding about the data, not about the service |
+| `gold.building_category_hotspots` | building × category (monthly variant as a view) | 17 buildings by 10 categories gives 170 cells of about 60 tickets each, dense enough to rank. It rests on counts, category and building, the reliable fields, and adds the number of safety-hazard tickets that are Low or unprioritised (580) |
+| `gold.assignee_workload_cost` | assignee × month | Workload and spend per assignee inform contract and staffing decisions. Cost is known for 62.9% of tickets, so coverage is a column; the 3,018 unassigned tickets are their own row, not hidden |
+
+Models I chose not to build: a daily building × category table (547 days × 170 cells for 10,000 tickets is almost
+all zeros), resolution-time rankings of assignees (the timestamps cannot support them), and a misrouted-ticket
+measure (assignee is independent of category).
+
+## Pipeline behaviour
+
+- **Idempotent.** Bronze skips files it has loaded. Silver and gold are rebuilt in a transaction from the same
+  inputs and the same rule set, so a re-run produces identical tables; a test compares checksums. A failure
+  leaves the previous version in place. A PostgreSQL advisory lock allows one run at a time: a second run
+  started meanwhile stops at once instead of interleaving.
+- **Logged.** `ops.pipeline_run` and `ops.stage_log` record rows in, out and rejected for every stage; the
+  console prints one line per event with the run ID. `ops.dq_results` records the effect of every rule per run.
+- **Lineage.** Every silver row carries the bronze row hash, batch, run and rule set version. `ops.lineage_edge`
+  records source, target, transformation, rule set version, who and when for every stage. Every mapping row
+  records who proposed and who approved it. A gold figure can be traced to the exact lines of the file.
+- **No manual steps, and no blocking.** An unseen category, priority or submitter does not stop a load: the row
+  is kept, labelled `Unclassified` or left unresolved, and flagged. A missing API key changes nothing.
+- **Thresholds.** After each run the signals in `rules/thresholds.yaml` are checked (reject rate, rows rejected
+  for a single reason, duplicate rate, unmapped values, unmatched notes). A breach writes `ops.alert`; a failure
+  exits non-zero. "Rejected for one reason only" is the drift signal: placeholder rows fail several checks, so a
+  row that fails just one is probably a real ticket hit by something new, such as an unregistered date format.
+- **Metadata tags at landing.** When a file lands, the bronze stage writes a semantic type and sensitivity per
+  column to `ops.column_tags`, set by rules on value shapes. `submitted_by` is tagged personal data and its
+  values are withheld from the profile the agent reads. Two known gaps: the rules miss `assigned_to`, which
+  mixes vendors with one named person, and the agent's probe queries are not masked, so a probe can still read
+  a tagged column.
+
+## The agents
+
+Part 2 asks for agents that make the process faster, smarter or more adaptive. Mine map to those words like this:
+
+| Agent | Faster | Smarter | More adaptive |
+|---|---|---|---|
+| Data Quality Agent | drafts rules, reasons and SQL from a profile when a new source arrives | | re-runs when a load drifts |
+| Semantic Classification Agent | | adds issue type and hazard signal, columns no rule could derive | maps new spellings without a code change |
+
+Both follow the same loop: deterministic preparation → one schema-constrained model call (or a short bounded
+loop) → automatic checks → risk policy → approval → deterministic SQL.
+
+### Data Quality Agent (option b)
+
+- **Starts from a profile, not from rows** (`pipeline/profiler.py`): per column, blank share, distinct count, top values
+  and value shapes (digits as 9, letters as a). Across columns, three generic scans that column statistics
+  cannot replace: near-duplicate rows, values sitting in another column's vocabulary, and timestamp order.
+  On this file those scans surface the 197 duplicate groups, the 50 swapped rows and the reversed timestamps.
+- **A bounded tool loop per column**, plus one for the cross-column findings: the model may ask for up to three
+  read-only probe queries, twice, before it must propose. Each probe returns at most 20 rows. The plan is fixed
+  and the context stays small.
+- **Proposes** a finding with numbers, why it matters, an action, SQL identifying the affected rows, and the
+  number of rows it expects that SQL to match.
+- **Is not trusted.** Its SQL passes a text check (one statement, no writes, no comments, no dangerous
+  functions), then runs on a separate connection in a read-only transaction as a role that can only `SELECT`
+  from bronze, with a timeout. The measured row count is compared with the claimed one; a mismatch rejects the
+  proposal. Tests attack each layer separately.
+- **Changes nothing by itself.** Proposals wait in `ops.rule_proposal`. Approved predicates run as checks on
+  every load and report into `ops.dq_results`.
+
+### Semantic Classification Agent (option c)
+
+| Task | Sent to the model | Lands in silver as |
+|---|---|---|
+| Category | distinct spellings with row counts and two masked sample descriptions | `category_std` via `category_map` |
+| Submitter | distinct name spellings and the known roster | `submitter_id`, `submitter_name` via `person_map` |
+| Issue type and hazard | masked description templates | `issue_type`, `hazard_signal` via `issue_map` |
+
+- **Distinct values only, in batches of 50.** Numbers, building names and asset IDs are masked first, which
+  collapses 4,600 distinct descriptions into 86 patterns and keeps identifiers out of the prompt.
+- **The mapping tables are the cache.** A value with a mapping is never sent again. Responses are also cached by
+  a hash of provider, model, prompt version and input; only answers that passed validation are cached.
+- **Deterministic first.** Rows the swap repair will fix are not candidates. Values seen on fewer than three
+  rows are held, not sent.
+- **Guardrails.** Output is schema-constrained with labels as enumerations and `unknown` always allowed. Every
+  key must come back exactly once. A canonical person name must already be known or be a full spelling present
+  in the input, so the model cannot invent a person. A rejected answer is retried once with the reason.
+- **Policy.** Category and issue mappings at or above 0.9 confidence are applied as *provisional* and listed for
+  review; anything lower is held. A person merge is a decision about identity and is always held for approval.
+
+### Prompts
+
+Prompts are versioned files in `agents/prompts/`; the version is stored with every output. `docs/prompt_preview.md`
+shows the exact prompts built from this data. Each has one job, states the allowed labels with definitions,
+passes counts and masked samples as context, and treats ticket text as untrusted: values are delimited and the
+instructions say to never follow instructions found in them. The evaluation set includes injection probes.
+
+### Cost and scale
+
+Model usage follows the number of distinct values, not the number of rows.
+
+| Work | On this file | At 10 million rows |
+|---|---|---|
+| Data Quality Agent | 14 investigations over a fixed-size profile | the same, plus one cycle per drift event |
+| Category | 46 values, 1 call | only spellings not seen before |
+| Submitter | 30 values, 1 call | grows with head-count, not tickets |
+| Issue type and hazard | 66 templates, 2 calls (the 20 cut-off variants are too rare to send) | grows with distinct normalised text: the real cost risk once text is not templated |
+| Notes, dates, cost, SLA, duplicates | no calls | no calls |
+
+What is **batched**: values per call, and for a backfill the provider's batch interface, where latency does not
+matter. What is **cached**: approved mappings, validated responses, the fixed instruction block. What is
+**skipped**: anything already mapped, anything a regular expression solves, quarantined rows, rare values. A
+token budget per command is a hard stop: classification ends, the load continues, the rest stays unmapped.
+
+This file's descriptions are templated, so they collapse almost completely. Real text would not. I would then
+rely on normalisation and exact-match caching first, a small model with escalation of low-confidence items
+second, and would measure cache hit rates before committing to a budget.
+
+## Agent assessment
+
+### How the agents are assessed
+
+`python -m pipeline evals` scores both agents against golden sets I labelled by hand during profiling
+(`evals/golden/`), independent of the approved rule set:
+
+| Golden set | Size | Scored on |
+|---|---|---|
+| Category map | 46 keys (62 raw spellings) → 10 labels | exact match; how many wrong answers were confident enough to auto-apply |
+| Person map | 30 keys → 16 people | false-merge pairs (the costly error) and missed-merge pairs |
+| Hazard signal | 66 templates, 12 marked ambiguous when I labelled them | accuracy on the 54 clear ones, and on all |
+| Data quality checklist | 18 known problems | recall; a problem counts as found when validated proposals on the right column cover the known rows |
+| Injection probes | 10 crafted values | how many were followed |
+
+Results go to `ops.agent_eval` with model and prompt version, so a prompt, tool or model change can be compared
+before it is accepted. `--consistency` repeats the category task three times without the cache.
+
+### Measured results
+
+<!-- AGENT_RESULTS:START -->
+No live agent run has been recorded in this database yet. Configure a provider in `.env`, then run `python -m pipeline evals` and `python -m pipeline report`.
+<!-- AGENT_RESULTS:END -->
+
+Sample input for every task is in `docs/prompt_preview.md`. Sample output, every proposal with its validation
+result, and token usage are written to `reports/agent_report.md` by `python -m pipeline report`, verbatim from
+what was recorded.
+
+### My honest take
+
+**Data Quality Agent: on this file, more trouble than it was worth; on the next file, probably not.** I profiled
+the data and wrote the rules before the agent existed, so it saved no time here. Building it taught me where the
+leverage is: the two findings that mattered most, the duplicates and the swapped columns, are invisible in
+per-column statistics. No model could have found them from the profile I first had; adding three cross-column
+scans to the profiler is what made them visible, and that is plain SQL. So the agent is as good as the profiler
+it reads, and its real value is the second source and the drifted load, where drafting rules with reasons from a
+ready profile is faster than starting cold. I trust it only because every proposal is re-measured by the
+database.
+
+**Semantic Classification Agent: low value for categories today, real value for people and hazard.** A
+hand-written lookup covers the 46 category keys exactly, and a lookup on the masked template reproduces the
+category perfectly, so on day one the agent cannot beat what I already had. It earns its place on day two: the
+tests load a second delivery with an unseen spelling, which is flagged, proposed (by a stub model in the test)
+and approved without a code change. Submitter resolution needs knowledge that string matching lacks (Bob is Robert), and a wrong merge is
+costly, which is why those are never auto-applied. The hazard signal is the one output no rule could give me. I
+marked 12 of 66 templates ambiguous while labelling them myself, so on those, agreement with my label is not
+accuracy.
+
+**Where I chose no agent.** Resolution notes follow 11 fixed sentence patterns: regular expressions match all
+8,705, and a model would add cost and variability for nothing. Schema inference (option a) for one 13-column
+file: writing the DDL takes minutes and reviewing generated DDL takes as long; header drift is detected by rule
+instead, and it would start to pay with many sources. Gold design (option d): the gold layer depends on knowing
+which fields can be trusted, and an agent given only the silver schema would reasonably propose resolution-time
+rankings on timestamps that are random. I would trust such an agent for mechanics, such as date spines and
+window functions, and override it on metric definitions and grain.
+
+## At 100 times the volume, with daily incremental loads
+
+| Area | Change |
+|---|---|
+| Ingestion | Already per file with a manifest. Add partitioning of bronze by ingestion date and chunked `COPY` |
+| Silver | Replace the full rebuild with a merge keyed on `ticket_id` for batches after a watermark. "Latest delivery wins" is already implemented and tested; the rebuild stays for backfills |
+| Duplicates | Store a hash of the ten matching fields with an index, so detection is a lookup, not a window over the table |
+| Late data and replays | Recompute a window of recent batches on every run; a backfill command replays a range. Silver merges by key and gold replaces whole month partitions, so a replay cannot double count |
+| Gold | Rebuild only the affected month partitions |
+| Engine | PostgreSQL with partitioning handles millions of tickets for this workload. For heavy concurrent analytics I would move silver and gold to a columnar warehouse; the SQL-first design ports directly |
+| Orchestration | A scheduler with retries per stage, and dbt for model dependencies and tests |
+| Agents | Run on the daily delta of unseen values with a review queue and a daily token budget. The drift signals trigger the Data Quality Agent |
+| Metadata | Publish lineage as OpenLineage events to a catalogue instead of only keeping it in `ops` |
+
+## Assumptions to confirm with the data owner
+
+- **Time zone.** Naive timestamps are kept as written; epoch values are converted using `SOURCE_TZ` (default UTC).
+  Two epoch values fall on 31 December 2023 in UTC while everything else starts on 1 January 2024, which suggests
+  the source clock is ahead of UTC.
+- **`Normal` priority** maps to Medium. **Zero cost** is a real zero. **`-1` cost, `999` and `0` SLA** are placeholders.
+- **Duplicate survivor** is the lowest ticket number.
+- The thresholds (0.9 confidence, three rows, alert levels) are starting values to be tuned with evaluation data.
+
+## Operator console (optional)
+
+The brief does not ask for a user interface, and nothing above depends on this one. The pipeline, the agents and
+their tests run without it, and deleting `console/` and `pipeline/api.py` removes it. It is here because the
+approval gate is the centre of the design, and a gate is easier to judge on screen than as command-line output.
+
+```bash
+docker compose --profile console up --build     # then open http://localhost:3000
+```
+
+![Console overview: rows per layer, the reconciliation, the threshold checks](docs/console-overview.png)
+
+| Screen | What it shows and does |
+|---|---|
+| Overview | Rows in each layer with the reconciliation the last run asserted, the threshold signals, what is waiting for review. Starts a run |
+| Runs | Run history. Per run: the stages, the measured effect of every rule, alerts and drift, lineage |
+| Review | Agent proposals with their evidence. For a mapping: value, confidence, reason. For a rule: the SQL, the claimed and the measured row count. Approve, correct while approving, or reject |
+| Data quality | Every cleaning rule with its measured effect, the quarantine with reasons, flags, column tags |
+| Gold | The three models, filterable and sortable, with coverage beside every rate |
+| Ticket trace | One ticket from the line in the file to silver, column by column, and whether gold counts it (`docs/console-trace.png`) |
+| Agents | The provider, what would be sent, starting an agent, recorded usage |
+
+- **`pipeline/api.py`** is a small FastAPI app with no logic of its own. Read routes query `ops`, `silver` and
+  `gold`; write routes call the functions the command line calls. `tests/test_3_console_api.py` checks that
+  what it reports is what the pipeline wrote, and drives a run, the approval gate and both agents over HTTP
+  with the stub model.
+- **`console/`** is a Next.js app. Its shell, design system and server-side request policy are adapted from the
+  console of my [DataMigration](https://github.com/mahi80/DataMigration) project, where a reviewer approves one
+  exact plan. Here a decision is sent for exactly the proposals on screen, by key.
+- **Access.** This is a local tool. The browser talks only to the console's own server, which forwards an
+  allow-list of routes to the API with a token the browser never sees, and refuses a change that does not come
+  from its own pages. The API is not published to the host and the console is published on 127.0.0.1 only. There are no
+  user accounts: a decision is recorded under `APPROVER`, exactly as on the command line. Anything shared
+  would need single sign-on and per-user identity first.
+- **Limits.** Agent runs are background jobs held in the API's memory, which suits one process and no more. At
+  100 times the volume this screen is the review queue in the table above, behind a real job queue.
+
+Without Docker: `CONSOLE_API_TOKEN=<secret> uvicorn pipeline.api:app`, then in `console/` run `npm install` and
+`CONSOLE_API_TOKEN=<secret> npm run dev`.
+
+The screenshots show the output of the supplied file. The Review and Agents screens have proposals to show only
+after an agent run; they were exercised in a browser with the test stub, and no stub output appears in this
+README.
+
+## Repository
+
+```
+sql/        00_schemas (DDL, parsers, hard checks), 20_silver, 30_gold
+pipeline/   cli, bronze, silver, gold, checks, profiler, rules, db, config; api (for the optional console)
+agents/     llm (providers, cache, budget), classifier, dq_agent, guard, review, evals, report, prompts/
+rules/      approved mappings (seed), cleaning_rules.yaml, thresholds.yaml, taxonomy.yaml
+evals/      golden sets; recordings of live runs for replay
+tests/      parsers, pipeline, agent plumbing with a stub model, console API, incremental load, provider adapters
+console/    the optional operator console (Next.js); its request-policy tests run with `npm test`
+docs/       architecture.png, prompt_preview.md, console screenshots
+```
+
+The agent tests use a stub in place of a model and prove only the plumbing: batching, validation, retries, the
+SQL guard, the approval gate, scoring. The report generator ignores stub calls, so a test run can never appear
+as a result.

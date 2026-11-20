@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+reports/*
+!reports/.gitkeep
+!reports/agent_report.md
+# optional console (Next.js)
+console/node_modules/
+console/.next/
+console/next-env.d.ts
+console/*.tsbuildinfo
+console/.env*.local

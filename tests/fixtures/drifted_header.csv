@@ -1,0 +1,2 @@
+ticket_id,created_at,resolved_at,category,priority,status,building,description,submitted_by,assigned_to,resolution_notes,cost,sla_hrs,region
+TKT-20001,2025-07-01 09:15:00,,Aircon,high,Open,Tower A,The AC unit on 4 floor is not working. Room temp is around 84F. Please fix ASAP.,Lisa Chen,ABC Mechanical,,,24,EMEA

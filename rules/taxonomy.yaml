@@ -1,0 +1,22 @@
+# The controlled vocabularies the classification agent may answer with. Definitions are part of the prompt.
+categories:
+  HVAC: heating, cooling, ventilation, thermostats, humidity
+  Electrical: power, outlets, lighting, breakers, emergency lighting
+  Plumbing: water supply, leaks, drains, toilets, taps, hot water
+  Fire Safety: fire alarms, smoke detectors, sprinklers, extinguishers, exit signs
+  Elevator: lifts, escalators, vertical transport
+  IT & Network: connectivity, WiFi, VPN, network ports, printers
+  Security & Access: badges, access control, locks, cameras, intruder alarms
+  Cleaning: janitorial, housekeeping, waste, spills, restroom servicing
+  Pest Control: insects, rodents, nests, exterminator visits
+  General Maintenance: furniture, paint, flooring, ceilings, windows, grounds, miscellaneous upkeep
+# Apply the first definition that fits, in this order.
+hazard_signals:
+  safety_hazard: >-
+    the text states a risk of injury (hazard, DO NOT USE, sparking, falling, trip, slip), or a fire or
+    life-safety device is failed, damaged, expired or sounding, or there are stinging insects
+  service_outage: >-
+    a shared building service or asset is down or unusable for more than one person, including active
+    leaks, overflows and flooding
+  routine: >-
+    everything else: single-desk faults, requests, cosmetic issues, noises, complaints, sightings

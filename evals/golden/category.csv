@@ -1,0 +1,47 @@
+raw_key,category_std
+cleaning,Cleaning
+housekeeping,Cleaning
+janitorial,Cleaning
+elec,Electrical
+electrical,Electrical
+electrical systems,Electrical
+power,Electrical
+power issue,Electrical
+elevator,Elevator
+elevator/escalator,Elevator
+lift,Elevator
+vertical transport,Elevator
+fire alarm,Fire Safety
+fire safety,Fire Safety
+fire/safety,Fire Safety
+sprinkler,Fire Safety
+general,General Maintenance
+general maintenance,General Maintenance
+maintenance,General Maintenance
+misc,General Maintenance
+other,General Maintenance
+a/c,HVAC
+ac,HVAC
+air conditioning,HVAC
+climate control,HVAC
+heating cooling,HVAC
+heating/cooling,HVAC
+hvac,HVAC
+hvac system,HVAC
+connectivity,IT & Network
+it,IT & Network
+it support,IT & Network
+it/network,IT & Network
+network,IT & Network
+wifi,IT & Network
+exterminator,Pest Control
+pest,Pest Control
+pest control,Pest Control
+plumbing,Plumbing
+plumbing issue,Plumbing
+water issue,Plumbing
+water/plumbing,Plumbing
+access control,Security & Access
+badge/access,Security & Access
+security,Security & Access
+security systems,Security & Access

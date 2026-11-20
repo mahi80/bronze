@@ -1,0 +1,29 @@
+# Observability thresholds checked after every run. A value above `warn` writes a row to ops.alert;
+# above `fail` the run exits with a non-zero code. These are starting values, tuned on one file.
+- signal: reject_rate_pct
+  description: Share of bronze rows quarantined
+  sql: SELECT round(100.0 * (SELECT count(*) FROM silver.tickets_rejected) / nullif((SELECT count(*) FROM bronze.tickets_raw), 0), 3)
+  warn: 1
+  fail: 5
+- signal: single_reason_rejects
+  description: Rows quarantined for one reason only (likely real tickets caught by a rule, e.g. a new date format)
+  sql: SELECT count(*) FROM silver.tickets_rejected WHERE cardinality(reasons) = 1
+  warn: 0
+  fail: 100
+- signal: duplicate_rate_pct
+  description: Share of valid tickets flagged as duplicates
+  sql: SELECT round(100.0 * count(*) FILTER (WHERE is_duplicate) / nullif(count(*), 0), 3) FROM silver.tickets
+  warn: 3
+  fail: 10
+- signal: unmapped_rows_pct
+  description: Share of valid tickets with a category, priority or submitter that has no approved mapping
+  sql: >-
+    SELECT round(100.0 * count(*) FILTER (WHERE dq_flags && ARRAY['category_unmapped', 'priority_unmapped', 'submitter_unmapped'])
+           / nullif(count(*), 0), 3) FROM silver.tickets
+  warn: 0
+  fail: 1
+- signal: unmatched_notes
+  description: Resolution notes that match none of the registered sentence patterns
+  sql: SELECT count(*) FROM silver.tickets WHERE note_type = 'other'
+  warn: 0
+  fail: 500

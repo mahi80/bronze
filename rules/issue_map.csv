@@ -1,0 +1,87 @@
+raw_key,issue_type,hazard_signal
+A/C leaking water onto the carpet near cubicle <N>. <BLDG>.,ac water leak,routine
+"Ant infestation in <BLDG>, <N> floor break room. Getting worse.",ant infestation,routine
+Badge reader at <BLDG> main entrance not working. Staff can't get in.,badge reader outage,service_outage
+Bird droppings on <BLDG> entrance canopy. Looks unpr,exterior cleaning,routine
+Bird droppings on <BLDG> entrance canopy. Looks unprofessional.,exterior cleaning,routine
+Breaker keeps tripping in server room <N>. Critical — affect,breaker tripping,service_outage
+Breaker keeps tripping in server room <N>. Critical — affects production systems.,breaker tripping,service_outage
+"Carpet coming up at seam, trip hazard, <BLDG> <N> floor.",flooring damage,safety_hazard
+"Carpet stain in executive suite, <BLDG>. Need professional cleaning.",carpet cleaning,routine
+"Ceiling tile falling in <BLDG> hallway, <N> floor. Hazard.",ceiling tile falling,safety_hazard
+Cockroach sighting in <BLDG> restroom. Third report this month.,cockroach sighting,routine
+Conference room <N> needs deep cleaning before client visit tomorrow.,room cleaning,routine
+Door <N> won't lock. Handle mechanism seems broken.,door lock fault,routine
+"Door handle broken on room <N>, <BLDG>.",door hardware fault,routine
+"Drain clogged in janitor closet, <N> floor.",clogged drain,routine
+Elevator <ASSET> stuck between floors <N> and <N>. No one inside,elevator stuck,service_outage
+Elevator <ASSET> stuck between floors <N> and <N>. No one inside (,elevator stuck,service_outage
+Elevator <ASSET> stuck between floors <N> and <N>. No one inside (confirmed).,elevator stuck,service_outage
+Elevator buttons for floor <N> not responding. <BLDG>.,elevator controls fault,service_outage
+Elevator making grinding noise. <BLDG> main elevator.,elevator noise,routine
+"Emergency exit sign burnt out, <BLDG> <N> floor east stai",exit sign failure,safety_hazard
+"Emergency exit sign burnt out, <BLDG> <N> floor east stair",exit sign failure,safety_hazard
+"Emergency exit sign burnt out, <BLDG> <N> floor east stairwell.",exit sign failure,safety_hazard
+"Emergency lighting test failed in stairwell A, <BLDG>.",emergency lighting failure,safety_hazard
+"Emergency lighting test failed in stairwell B, <BLDG>.",emergency lighting failure,safety_hazard
+"Emergency lighting test failed in stairwell C, <BLDG>.",emergency lighting failure,safety_hazard
+"Emergency lighting test failed in stairwell North, <BLDG>.",emergency lighting failure,safety_hazard
+"Emergency lighting test failed in stairwell South, <BLDG>.",emergency lighting failure,safety_hazard
+Faucet in <BLDG> kitchen won't turn off completel,dripping faucet,routine
+Faucet in <BLDG> kitchen won't turn off completely. Constant drip.,dripping faucet,routine
+"Fire alarm triggered in <BLDG>, <N> floor. No visible fire. Possible sensor malfunction.",fire alarm activation,safety_hazard
+"Fire extinguisher expired in hallway near room <N>, <BLDG>.",extinguisher expired,safety_hazard
+Furniture request — need <N> additional chairs for room <N>.,furniture request,routine
+Half the lights on <N> floor are out. <BLDG>.,lighting outage,service_outage
+"Heating system making loud banging noises in <BLDG>, <N> floor. Started yesterday.",heating noise,routine
+Hot water not working in <BLDG>. Multiple sinks aff,hot water outage,service_outage
+Hot water not working in <BLDG>. Multiple sinks affected,hot water outage,service_outage
+Hot water not working in <BLDG>. Multiple sinks affected.,hot water outage,service_outage
+Internet extremely slow in <BLDG>. Speed test showing <N> Mbps down.,slow internet,service_outage
+"Lights flickering in <BLDG>, <N> floor hallway. Has been happening for <N> days.",lighting fault,routine
+Mice spotted in <BLDG> kitchen area. Droppings found in cabinets.,rodent sighting,routine
+Need access card programmed for new employee starting Monday,access card request,routine
+Need access card programmed for new employee starting Monday. <BLDG> <N> floor.,access card request,routine
+Network jack at desk <N> not active. New hire needs connecti,network port activation,routine
+Network jack at desk <N> not active. New hire needs connectivity.,network port activation,routine
+Paint peeling in <BLDG> lobby. Looks bad for visitors.,paint repair,routine
+Parking lot pothole getting larger. Near spot <N>.,pothole,routine
+Please check the HVAC — multiple complaints from staff on <N> floor about humidity.,humidity complaint,routine
+Power outlet not working at desk <N>. Tried multiple devices.,outlet fault,routine
+Printer on <N> floor not connecting to network. Model HP <ASSET>.,printer connectivity,routine
+Restrooms on <N> floor haven't been serviced today.,restroom servicing,routine
+Security camera <ASSET> offline since yesterday. Covers parkin,camera offline,service_outage
+Security camera <ASSET> offline since yesterday. Covers parking lot sector <N>.,camera offline,service_outage
+"Sparking outlet in <BLDG> — DO NOT USE, taped off",sparking outlet,safety_hazard
+Spill in <BLDG> lobby. Slip hazard.,spill,safety_hazard
+Sprinkler head damaged in <BLDG> storage room <N>. Needs replacement before it leaks.,sprinkler damage,safety_hazard
+Tailgating incident reported at <BLDG> loading dock. Review camera footage.,tailgating incident,routine
+Temperature control issue in conference room <N>. The thermo,thermostat fault,routine
+Temperature control issue in conference room <N>. The thermostat reads <N> degrees but it feels much colder.,thermostat fault,routine
+The AC unit on <N> floor is not working. Room temp is around <N>,cooling failure,service_outage
+The AC unit on <N> floor is not working. Room temp is around <N>F. Please fix ASAP.,cooling failure,service_outage
+Toilet in <N> floor men's restroom is overflowing. Urgent.,toilet overflow,service_outage
+Unit <ASSET> cycling on and off every few minutes. Coils might,unit short cycling,routine
+Unit <ASSET> cycling on and off every few minutes. Coils might be frozen.,unit short cycling,routine
+VPN issues from <BLDG> conference room. Can't con,vpn connectivity,routine
+VPN issues from <BLDG> conference room. Can't conne,vpn connectivity,routine
+VPN issues from <BLDG> conference room. Can't connect to,vpn connectivity,routine
+VPN issues from <BLDG> conference room. Can't connect to corporate.,vpn connectivity,routine
+"Wasp nest forming on <BLDG> exterior, near entrance.",wasp nest,safety_hazard
+"Water leak detected in ceiling tiles, <BLDG> room <N>. A",ceiling water leak,service_outage
+"Water leak detected in ceiling tiles, <BLDG> room <N>. Appears to be coming from above.",ceiling water leak,service_outage
+Wheelchair-accessible elevator in <BLDG> has expired ins,elevator inspection expired,routine
+Wheelchair-accessible elevator in <BLDG> has expired inspection certificate (noticed today).,elevator inspection expired,routine
+"WiFi down on <N> floor, <BLDG>. Multiple users affected.",wifi outage,service_outage
+alarm going off <BLDG> no apparent reason,unexplained alarm,routine
+bugs in office <BLDG>,insect sighting,routine
+cold,temperature complaint,routine
+elevator out of order again <BLDG>,elevator out of service,service_outage
+hvac broken again in <BLDG>. its really hot,cooling failure,service_outage
+need more outlets in conf room <N>,outlet request,routine
+pipe burst,pipe burst,service_outage
+smoke detector beeping <BLDG>,smoke detector fault,safety_hazard
+trash overflowing in kitchen area <BLDG>,waste overflow,routine
+water everywhere in bathroom <BLDG>,bathroom flooding,service_outage
+wifi password not working,wifi access,routine
+window cracked <BLDG> <N> floor,window damage,routine

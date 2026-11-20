@@ -1,0 +1,5 @@
+ticket_id,created_at,resolved_at,category,priority,status,building,description,submitted_by,assigned_to,resolution_notes,cost,sla_hours
+TKT-3960,2024-10-24 14:32:10,2024-10-25 09:00:00,power issue,High,Closed,HQ Floor 2,Breaker keeps tripping in server room 391. Critical — affects production systems.,D. Kim,CityWide Electric,fixed,250.00,8
+TKT-20001,2025-07-01 09:15:00,,Aircon,high,Open,Tower A,The AC unit on 4 floor is not working. Room temp is around 84F. Please fix ASAP.,Lisa Chen,ABC Mechanical,,,24
+TKT-20002,2025/07/01 10:00,,Plumbing,low,Open,Tower B,pipe burst,Lisa Chen,,,,8
+TKT-20003,2025-07-02T08:00:00,,Lift,medium,Open,Annex East,elevator out of order again Annex East,Rob Martinez,,,,48
