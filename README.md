@@ -99,19 +99,51 @@ docker compose run --rm --entrypoint pytest pipeline -q   # 80 tests, against a 
 
 ### 7. Optional: agents and the approval gate
 
-Agents need a model provider; without one, everything above still runs. After filling `.env`, recreate the
-services so they see it (`docker compose up -d`).
+The pipeline (steps 4–6) never calls a model. Only the two agents and the eval do, so they need a provider and a
+key in `.env`. Copy the template, then change `LLM_PROVIDER=none` to `anthropic` and paste your key:
 
 ```bash
-cp .env.example .env                                     # LLM_PROVIDER, LLM_API_KEY, models
-docker compose run --rm pipeline agents dq               # propose rules from the bronze profile
-docker compose run --rm pipeline agents classify         # propose mappings for values not seen before
-docker compose run --rm pipeline proposals               # what is waiting for a person
-docker compose run --rm pipeline approve --task category --key aircon --set HVAC
-docker compose run --rm pipeline prompts                 # write the exact prompts, without calling a model
-docker compose run --rm pipeline evals                   # score both agents against the golden sets
-docker compose run --rm pipeline report --update-readme  # write reports/agent_report.md and refresh this file
+cp .env.example .env
 ```
+
+```ini
+# .env — the lines to edit; everything else in the template keeps its default
+LLM_PROVIDER=anthropic
+LLM_API_KEY=sk-ant-...
+# optional — these are the defaults:
+LLM_MODEL_SMALL=claude-haiku-5-5      # classification and data quality
+LLM_MODEL_STRONG=claude-sonnet-5-5    # rule proposals
+LLM_TOKEN_BUDGET=400000               # hard cap per command; a load is not blocked when it is reached
+```
+
+`.env` is git-ignored, so the key stays out of commits. To point at any OpenAI-compatible endpoint instead
+(OpenAI, a gateway, or a local Ollama or llama.cpp on the host), use:
+
+```ini
+LLM_PROVIDER=openai_compat
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_MODEL_SMALL=<model your endpoint serves>
+LLM_MODEL_STRONG=<model your endpoint serves>
+LLM_API_KEY=<the endpoint's key, if it needs one>
+```
+
+One-off `run` commands read `.env` every time. If you will also start agents from the console, recreate the
+services once after editing so the API container sees the file (`docker compose up -d`).
+
+```bash
+docker compose run --rm pipeline agents dq               # needs the key: propose rules from the bronze profile
+docker compose run --rm pipeline agents classify         # needs the key: propose mappings for values not seen before
+docker compose run --rm pipeline proposals               # stored proposals; no model
+docker compose run --rm pipeline approve --task category --key aircon --set HVAC
+docker compose run --rm pipeline prompts                 # writes the exact prompts, no model call
+docker compose run --rm pipeline evals                   # needs the key: scores both agents against the golden sets
+docker compose run --rm pipeline report --update-readme  # stored runs; no model call
+```
+
+Without a provider, `agents` and `evals` stop with "agents are not configured" (exit code 3); `run`, `profile`,
+`proposals`, `approve`, `prompts` and `report` work regardless. `LLM_PROVIDER=replay` answers from recordings in
+`evals/recordings/` instead of a live model — that directory ships empty, and `export-recordings` fills it from
+runs you already paid for.
 
 The console's **Review** screen is the same gate: approve, correct while approving, or reject. A rejected value
 stays counted as unmapped and is listed so the decision can be reopened.
