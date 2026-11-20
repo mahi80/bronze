@@ -12,7 +12,7 @@ https://github.com/user-attachments/assets/95090cf5-a031-4b8d-91bc-40d08d5282dd
 A five and a half minute narrated walkthrough, recorded in the console: an empty database, the supplied file
 loaded with one click, the three pipeline stages shown separately, a second delivery uploaded through the browser,
 the two mappings it puts in front of a person, a rejected value reopened and approved, and the re-run that applies
-them. The title card is the architecture; a still version is in
+them. The title card shows the layer flow; the full diagram, adding the console entry and the review loop, is
 `docs/architecture.png`, and the same video ships in the repository as `docs/walkthrough.mp4`.
 
 | | |
@@ -86,20 +86,21 @@ The supplied file arrives byte-identical — `sha256sum data/raw_tickets.csv` st
 
 ```mermaid
 flowchart LR
-    F["data/raw_tickets.csv"] --> B[("bronze.tickets_raw<br/>text as-is + lineage")]
+    F["data/raw_tickets.csv<br/>+ data/uploads/*.csv"] --> B[("bronze.tickets_raw<br/>text as-is + lineage<br/>one load per content hash")]
     B --> S[("silver.tickets<br/>typed, standardised, flagged")]
     B --> R[("silver.tickets_rejected")]
     S --> G[("gold: 3 models")]
     B -. "column profile" .-> DQ["Data Quality Agent"]
     B -. "distinct values" .-> SC["Semantic Classification Agent"]
-    DQ -- "rule proposals" --> V{"automatic checks<br/>+ approval"}
+    DQ -- "rule proposals" --> V{"automatic checks<br/>+ approval<br/>reject keeps it unmapped"}
     SC -- "mapping proposals" --> V
-    V -- "approved" --> M[("mapping tables,<br/>approved checks")]
+    V -- "approved" --> M[("mapping tables,<br/>approved + rejected<br/>decisions")]
     M --> S
 ```
 
-A static version is in `docs/architecture.png`. Everything lives in one PostgreSQL database with one schema per
-layer, plus `ops` for run metadata.
+A static version is in `docs/architecture.png`, including the console entry and the review loop. Everything that
+holds data lives in one PostgreSQL database with one schema per layer, plus `ops` for run metadata; the console is
+a thin client over the same API the CLI uses.
 
 | Schema | Holds | Naming |
 |---|---|---|
@@ -159,7 +160,8 @@ fields) and `_dup_seq` (the nth occurrence of identical content within a file).
   hold together.
 - A file whose header differs from the registered one is not loaded. The difference is recorded in
   `ops.drift_event` and the run fails with a message naming the added and missing columns.
-- The source file is mounted read-only.
+- `data/raw_tickets.csv` is mounted read-only. A CSV uploaded in the console is content-hashed, stored under
+  `data/uploads/`, and loaded by the same bronze glob on the next run.
 
 A test compares the row hashes in bronze with hashes computed from the CSV: they are identical.
 
@@ -586,12 +588,12 @@ README.
 
 ```
 sql/        00_schemas (DDL, parsers, hard checks), 20_silver, 30_gold
-pipeline/   cli, bronze, silver, gold, checks, profiler, rules, db, config; api (for the optional console)
+pipeline/   cli, bronze, silver, gold, checks, profiler, rules, db, config; api (the console's backend)
 agents/     llm (providers, cache, budget), classifier, dq_agent, guard, review, evals, report, prompts/
 rules/      approved mappings (seed), cleaning_rules.yaml, thresholds.yaml, taxonomy.yaml
 evals/      golden sets used by the agent eval
 tests/      parsers, pipeline, agent plumbing with a stub model, console API, incremental load, provider adapters
-console/    the optional operator console (Next.js); its request-policy tests run with `npm test`
+console/    the operator console (Next.js), part of the default compose stack; its request-policy tests run with `npm test`
 docs/       architecture.png, walkthrough.mp4 (narrated, captioned), prompt_preview.md, console screenshots
 ```
 
