@@ -341,33 +341,35 @@ Sample input for every task is in `docs/prompt_preview.md`. Sample output, every
 result, and token usage are written to `reports/agent_report.md` by `python -m pipeline report`, verbatim from
 what was recorded.
 
-### My honest take
+### Caveats
 
-The Data Quality Agent was more trouble than it was worth on this file. I had profiled the data and written most
-of the rules before it existed, so it didn't save me time, and it cost about $0.50 across 27 model calls. What it
-did do was find 17 of the 18 problems on my checklist, and all 35 proposals it made passed the SQL and row-count
-checks. That number flatters it a little. The two findings that actually mattered, the duplicates and the swapped
-columns, came out of three cross-column scans I added to the profiler, and those scans are plain SQL. A model
-given only per-column summaries would have missed both. So the agent is only as good as the profile it reads. Its
-real use is the next file, where I won't have the rules already written and a proposal with a measured row count
-and a reason beats a blank page. I still wouldn't trust one without the database re-measuring every claim.
+The numbers above are real. They are also narrower than they look.
 
-On classification, categories were a wash. A lookup I wrote by hand covers all 46 category keys, and the agent
-got 44 of 46, with both misses coming back "unknown" for misc and other. At least that is the safe way to fail.
-Submitter resolution did better than I expected: 16 people found out of 16, no false merges and no missed merges.
-That matters more than the category score, because a wrong merge quietly fuses two people's tickets. Hazard
-detection is the part I couldn't have written as a lookup, and it got 96.3% on the 54 templates that aren't
-ambiguous. Two caveats. I labelled the 12 ambiguous templates myself, so agreement there says more about my
-labelling than the model. And it produced 60 distinct issue types for 66 templates, which is closer to a free-text
-summary than a taxonomy. I would tighten that before using it for grouping.
+- **Small, hand-labelled golden sets.** 46 category keys, 30 submitter spellings, 66 templates. One wrong label
+  moves the category score by more than two points. I marked 12 of the 66 hazard templates ambiguous myself and
+  left them out of the headline accuracy; that was my judgement, not a property of the model.
+- **No win over the lookup on categories.** A hand-written map already covers all 46 keys. The agent got 44, with
+  both misses returning unknown for misc and other. Safe, but on this file it adds nothing. Its case is the
+  unseen spelling on a later delivery, and that path is tested with a stub, not a live model.
+- **Hazard accuracy is per template, not per row.** Templates repeat unevenly in the file, so a row-weighted
+  score would differ. The agent also produced 60 distinct issue types for 66 templates, which is too fine-grained
+  to group on without tightening the taxonomy.
+- **"Found" is a generous test for the Data Quality Agent.** A problem counts as found when a validated proposal
+  on the right column covers at least 90% of the known rows, or when a keyword matches. It hit 17 of 18, but it
+  cost about $0.50 and 27 calls after I had already written most of the rules, so it saved no time here. The two
+  findings that mattered, the duplicates and the swapped columns, came from cross-column SQL I added to the
+  profiler. The agent is only as good as those scans.
+- **One file, one model, one afternoon.** Consistency was three repeats of 46 category inputs with the cache
+  bypassed; it says the answers were stable in that run, nothing about a model upgrade. The defaults are the
+  current list models, and the harness is what lets the next model be compared rather than assumed.
+- **These results do not measure the pipeline.** Bronze, silver and gold were built and checked before the agents
+  ran, and no agent can change silver without an approved mapping. Remove the agents and the output is still the
+  same 10,000 tickets.
 
-I skipped agents where a rule is enough. Resolution notes follow 11 fixed patterns and the regexes match all
-8,705 of them, so a model would add cost and variance for nothing. Schema inference for a single 13-column file
-is the same trade: writing the DDL took me minutes, and reviewing generated DDL would take about as long. Header
-drift is caught by a rule instead, and that is where inference starts to pay, with many sources. Gold design has
-a bigger problem. The useful input is knowing which fields can be trusted, and the timestamps here are random, so
-an agent given only the silver schema would propose sensible mechanics on top of bad assumptions. I would let it
-write date spines and window functions. I wouldn't let it pick the metrics.
+The limits I would watch next are cost and review load. $0.50 to evaluate is cheap; running the Data Quality
+Agent on every delivery is not, and a queue of 35 proposals is real work. The 0.9 confidence and three-row
+thresholds are starting values, not tuned ones. The first changes I would make are a row-weighted hazard score,
+golden sets split by delivery date, and a recorded live replay so the eval runs without a key.
 
 ## At 100 times the volume, with daily incremental loads
 
