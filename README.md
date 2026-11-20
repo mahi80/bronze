@@ -22,6 +22,38 @@ them. The title card is the architecture; a still version, with the run-metadata
 | Tests | 80, against a real PostgreSQL (`pytest`) |
 | Agents | Data Quality Agent (option b) and Semantic Classification Agent (option c) |
 
+## Architecture
+
+```mermaid
+flowchart LR
+    F["data/raw_tickets.csv<br/>+ data/uploads/*.csv"] --> B[("bronze.tickets_raw<br/>text as-is + lineage<br/>one load per content hash")]
+    B --> S[("silver.tickets<br/>typed, standardised, flagged")]
+    B --> R[("silver.tickets_rejected")]
+    S --> G[("gold: 3 models")]
+    B -. "column profile" .-> DQ["Data Quality Agent"]
+    B -. "distinct values" .-> SC["Semantic Classification Agent"]
+    DQ -- "rule proposals" --> V{"automatic checks<br/>+ approval<br/>reject keeps it unmapped"}
+    SC -- "mapping proposals" --> V
+    V -- "approved" --> M[("mapping tables,<br/>approved + rejected<br/>decisions")]
+    M --> S
+```
+
+A static version is in `docs/architecture.png`, including the console entry and the review loop. Everything that
+holds data lives in one PostgreSQL database with one schema per layer, plus `ops` for run metadata; the console is
+a thin client over the same API the CLI uses.
+
+| Schema | Holds | Naming |
+|---|---|---|
+| `bronze` | `tickets_raw`: every source column as text, exactly as delivered | lineage columns start with `_` |
+| `silver` | `tickets`, `tickets_rejected`, the mapping tables, the view `tickets_current` | `_std` standardised, `_raw` original, `is_...` flags, `dq_flags` array |
+| `gold` | three aggregate tables named for subject and grain | every row carries `_run_id` |
+| `ops` | run and stage log, rule effects, lineage, alerts, agent calls, proposals, evaluations | |
+
+Choices, briefly: PostgreSQL because the brief suggests it and transactions make idempotent loads simple. SQL
+files run by a small Python tool because a reviewer can read exactly what each layer does. No dbt, Airflow or
+agent framework: three linear stages and single-purpose model calls do not need them. I would add dbt and a
+scheduler at production scale (see "At 100 times the volume").
+
 ## How to run
 
 The terminal route, in order. Every step has a console equivalent. Nothing is pre-loaded: the database starts
@@ -161,38 +193,6 @@ clash with a local install).
 
 The supplied file arrives byte-identical — `sha256sum data/raw_tickets.csv` starts with `2bf36d21` — because
 `.gitattributes` marks it binary, so no checkout setting can rewrite its line endings.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    F["data/raw_tickets.csv<br/>+ data/uploads/*.csv"] --> B[("bronze.tickets_raw<br/>text as-is + lineage<br/>one load per content hash")]
-    B --> S[("silver.tickets<br/>typed, standardised, flagged")]
-    B --> R[("silver.tickets_rejected")]
-    S --> G[("gold: 3 models")]
-    B -. "column profile" .-> DQ["Data Quality Agent"]
-    B -. "distinct values" .-> SC["Semantic Classification Agent"]
-    DQ -- "rule proposals" --> V{"automatic checks<br/>+ approval<br/>reject keeps it unmapped"}
-    SC -- "mapping proposals" --> V
-    V -- "approved" --> M[("mapping tables,<br/>approved + rejected<br/>decisions")]
-    M --> S
-```
-
-A static version is in `docs/architecture.png`, including the console entry and the review loop. Everything that
-holds data lives in one PostgreSQL database with one schema per layer, plus `ops` for run metadata; the console is
-a thin client over the same API the CLI uses.
-
-| Schema | Holds | Naming |
-|---|---|---|
-| `bronze` | `tickets_raw`: every source column as text, exactly as delivered | lineage columns start with `_` |
-| `silver` | `tickets`, `tickets_rejected`, the mapping tables, the view `tickets_current` | `_std` standardised, `_raw` original, `is_...` flags, `dq_flags` array |
-| `gold` | three aggregate tables named for subject and grain | every row carries `_run_id` |
-| `ops` | run and stage log, rule effects, lineage, alerts, agent calls, proposals, evaluations | |
-
-Choices, briefly: PostgreSQL because the brief suggests it and transactions make idempotent loads simple. SQL
-files run by a small Python tool because a reviewer can read exactly what each layer does. No dbt, Airflow or
-agent framework: three linear stages and single-purpose model calls do not need them. I would add dbt and a
-scheduler at production scale (see "At 100 times the volume").
 
 ## What the data contains
 
