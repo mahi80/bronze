@@ -148,10 +148,11 @@ export interface MappingProposal {
   task: string;
   key: string;
   value: string;
-  status: "proposed" | "provisional";
+  status: "proposed" | "provisional" | "rejected";
   confidence: number | null;
   reason: string | null;
   model: string | null;
+  affected: number;
 }
 
 export interface RuleProposal {
@@ -176,6 +177,7 @@ export interface RuleProposal {
 export interface ReviewQueue {
   approver: string;
   mappings: MappingProposal[];
+  rejected: { task: string; key: string; value: string; affected: number; decided_by: string | null; decided_at: string | null }[];
   rules: RuleProposal[];
   rule_set: { task: string; approved: number; approved_after_review: number; provisional: number; proposed: number; rejected: number }[];
   approved_checks: number;

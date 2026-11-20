@@ -7,12 +7,13 @@ The design rule is one sentence: **agents propose, code checks, a person approve
 plain SQL.** No model call sits in the row-by-row path, so the pipeline is deterministic, re-runnable, and works
 with no API key at all.
 
-https://github.com/user-attachments/assets/c65a4e67-ceb6-4e84-89c6-2f3555290e6e
+https://github.com/user-attachments/assets/95090cf5-a031-4b8d-91bc-40d08d5282dd
 
-A three and a half minute narrated walkthrough, recorded in the console on the supplied file: the first run, a
-second delivery uploaded through the browser, the two mappings it puts in front of a person, and the re-run that
-applies them. The title card is the architecture; a still version is in `docs/architecture.png`, and the same
-video ships in the repository as `docs/walkthrough.mp4`.
+A five and a half minute narrated walkthrough, recorded in the console: an empty database, the supplied file
+loaded with one click, the three pipeline stages shown separately, a second delivery uploaded through the browser,
+the two mappings it puts in front of a person, a rejected value reopened and approved, and the re-run that applies
+them. The title card is the architecture; a still version is in
+`docs/architecture.png`, and the same video ships in the repository as `docs/walkthrough.mp4`.
 
 | | |
 |---|---|
@@ -24,14 +25,15 @@ video ships in the repository as `docs/walkthrough.mp4`.
 ## How to run
 
 ```bash
-docker compose up --build        # starts PostgreSQL, then runs bronze -> silver -> gold once
+docker compose up --build        # PostgreSQL, the API and the console on http://localhost:3000
 ```
 
-That is everything needed for the pipeline. The pipeline container exits when the run completes and PostgreSQL
-keeps running. The other commands:
+Open http://localhost:3000. The database starts empty; one button loads `data/raw_tickets.csv` into bronze and
+builds silver and gold, and the Pipeline screen shows what went into each stage and what came out. The same run
+from a terminal:
 
 ```bash
-docker compose run --rm pipeline run                 # run again: idempotent, changes nothing
+docker compose run --rm pipeline run                 # load and build; running again is idempotent, changes nothing
 docker compose run --rm --entrypoint pytest pipeline -q   # the test suite
 psql -h localhost -p 5433 -U medallion medallion     # password: medallion
 
@@ -44,8 +46,7 @@ docker compose run --rm pipeline proposals           # what is waiting for a per
 docker compose run --rm pipeline approve --task category --key aircon --set HVAC
 docker compose run --rm pipeline prompts             # write the exact prompts, without calling a model
 
-# optional: the same, plus a web console on http://localhost:3000 (see "Operator console")
-docker compose --profile console up --build
+docker compose --profile batch up --build            # no console: PostgreSQL and one pipeline run
 ```
 
 Without Docker: `pip install -r requirements.txt`, set `DATABASE_URL`, then `python -m pipeline run`. Its default
@@ -61,20 +62,21 @@ clash with a local install).
    docker compose version
    ```
 
-2. Clone and start; the first build takes a few minutes, then the pipeline container runs once and exits while
-   PostgreSQL stays up:
+2. Clone and start; the first build takes a few minutes, then PostgreSQL, the API and the console are up:
 
    ```bash
    git clone https://github.com/mahi80/bronze.git && cd bronze
    docker compose up --build
    ```
 
-3. Run it again to see that it is idempotent — the row counts do not change — and add the console profile at
-   http://localhost:3000 when you want the screens:
+3. Open http://localhost:3000 and click **Load and run**. The database is empty until that click: the supplied
+   file lands in bronze, silver is cleaned and validated, gold is aggregated, and each stage shows what went in
+   and what came out. Upload a CSV next and run again to see a later delivery ingested through the same path.
+   From a terminal, the equivalent is:
 
    ```bash
    docker compose run --rm pipeline run
-   docker compose --profile console up --build
+   docker compose run --rm pipeline run     # a second time: the row counts do not change
    ```
 
 The supplied file arrives byte-identical — `sha256sum data/raw_tickets.csv` starts with `2bf36d21` — because
@@ -526,27 +528,33 @@ golden sets split by delivery date, and a recorded live replay so the eval runs 
 - **Duplicate survivor** is the lowest ticket number.
 - The thresholds (0.9 confidence, three rows, alert levels) are starting values to be tuned with evaluation data.
 
-## Operator console (optional)
+## Operator console
 
-The brief does not ask for a user interface, and nothing above depends on this one. The pipeline, the agents and
-their tests run without it, and deleting `console/` and `pipeline/api.py` removes it. It is here because the
-approval gate is the centre of the design, and a gate is easier to judge on screen than as command-line output.
+The brief does not ask for a user interface, and nothing above depends on this one: the pipeline, the agents and
+their tests run without it, and deleting `console/` and `pipeline/api.py` removes it. It ships in the default
+Compose stack because the approval gate is the centre of the design, and a gate is easier to judge on screen than
+as command-line output.
 
 ```bash
-docker compose --profile console up --build     # then open http://localhost:3000
+docker compose up --build     # then open http://localhost:3000
 ```
 
 ![Console overview: rows per layer, the reconciliation, the threshold checks](docs/console-overview.png)
 
-Upload a CSV loads a later delivery through the same bronze path as the supplied file, then a run reconciles it.
-The walkthrough at the top of this file shows that round trip.
+![Console pipeline: the files into bronze, the rows out of silver, the three gold models](docs/console-pipeline.png)
+
+Before the first run the console shows the three stages and one button that loads the supplied file; nothing is
+pre-loaded. Upload a CSV to add a later delivery to the same bronze path, then run: the Pipeline screen shows the
+files that went into bronze, the rows that came out of silver (valid, quarantined, duplicates flagged) and the
+three gold models, each with its reconciliation. Uploading and running is the round trip the walkthrough shows.
 
 | Screen | What it shows and does |
 |---|---|
 | Overview | Rows in each layer with the reconciliation the last run asserted, the threshold signals, what is waiting for review. Starts a run; uploads a delivered CSV |
+| Pipeline | The three stages separately: files and rows into bronze, valid/quarantined/duplicate rows out of silver, the three gold models with their row counts, each linking to its detail screen |
 | Runs | Run history. Per run: the stages, the measured effect of every rule, alerts and drift, lineage |
 | Data | The first 100 rows of bronze exactly as delivered, and the fixed-size profile the Data Quality Agent reads: blanks per column, near-duplicates, values in the wrong column, timestamps out of order, the candidate key, and which columns are sensitive and why |
-| Review | Agent proposals with their evidence. For a mapping: value, confidence, reason. For a rule: the SQL, the claimed and the measured row count. Approve, correct while approving, or reject |
+| Review | Agent proposals with their evidence. For a mapping: value, confidence, reason, and how many tickets depend on the decision. For a rule: the SQL, the claimed and the measured row count. Approve, correct while approving, or reject; a rejected value stays counted as unmapped and is listed so the decision can be reopened |
 | Data quality | Every cleaning rule with its measured effect, the quarantine with reasons, flags, column tags |
 | Gold | The three models, filterable and sortable, with coverage beside every rate |
 | Ticket trace | One ticket from the line in the file to silver, column by column, and whether gold counts it (`docs/console-trace.png`) |

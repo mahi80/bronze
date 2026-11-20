@@ -10,11 +10,11 @@ import { DataTable, EmptyState, Loading, Meter, Notice, Panel, StatusBadge, Tabs
 
 export interface Pipeline { run: () => void; busy: boolean }
 
-export function RunButton({ pipeline }: { pipeline: Pipeline }) {
+export function RunButton({ pipeline, label = "Run pipeline" }: { pipeline: Pipeline; label?: string }) {
   return (
     <button className="button primary" onClick={pipeline.run} disabled={pipeline.busy}>
       {pipeline.busy ? <LoaderCircle size={16} className="spin" /> : <Play size={15} />}
-      {pipeline.busy ? "Running…" : "Run pipeline"}
+      {pipeline.busy ? "Running…" : label}
     </button>
   );
 }

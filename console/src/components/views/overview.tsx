@@ -1,10 +1,11 @@
 "use client";
 
-import { ArrowRight, CheckCheck, ClipboardCheck, Workflow } from "lucide-react";
+import { ArrowRight, CheckCheck, ClipboardCheck } from "lucide-react";
 import type { Overview, Run, Signal } from "../api";
 import { count, dateLabel, duration, signalName, useApi } from "../api";
 import type { Navigate } from "../console";
-import { DataTable, EmptyState, LayerDot, Loading, Meter, Panel, StatusBadge } from "../ui";
+import { StartPanel } from "../start";
+import { DataTable, LayerDot, Loading, Meter, Panel, StatusBadge } from "../ui";
 import { UploadButton } from "../upload";
 import type { Pipeline } from "./runs";
 import { RunButton, runColumns } from "./runs";
@@ -14,30 +15,20 @@ export function OverviewView({ overview, refresh, pipeline, onNavigate, onChange
 }) {
   const recent = useApi<{ runs: Run[] }>(overview.data?.initialised ? "runs?limit=5" : null, refresh);
   const data = overview.data;
+  const hasRows = Boolean(data?.accounting);
   const heading = (
     <div className="page-heading">
       <div>
         <h1>Overview</h1>
         <p>What the last run loaded, what it set aside, and whether every row is accounted for.</p>
       </div>
-      <div className="heading-actions"><UploadButton onChanged={onChanged} /><RunButton pipeline={pipeline} /></div>
+      {hasRows && <div className="heading-actions"><UploadButton onChanged={onChanged} /><RunButton pipeline={pipeline} /></div>}
     </div>
   );
   if (!data) return <>{heading}{overview.loading && <Loading />}</>;
 
   const rows = data.accounting;
-  if (!rows) {
-    return (
-      <>
-        {heading}
-        <section className="panel">
-          <EmptyState icon={Workflow} title="No run has completed in this database"
-            description="Run the pipeline to load the files in data/ into bronze, then build silver and gold. It takes a couple of seconds and can be repeated safely."
-            action={<RunButton pipeline={pipeline} />} />
-        </section>
-      </>
-    );
-  }
+  if (!rows) return <>{heading}<StartPanel pipeline={pipeline} onChanged={onChanged} /></>;
 
   const gold = data.gold ?? [];
   const pending = data.pending ?? { mappings: 0, rules: 0 };

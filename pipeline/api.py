@@ -238,6 +238,10 @@ def create_app(settings: config.Settings | None = None, transport=None) -> FastA
     @api.get("/review")
     def review_queue(conn=Depends(connection)):
         pending = review.pending(conn)
+        mappings = [p for p in pending if p["task"] != "rule"]
+        counts = review.affected_counts(conn, [(p["task"], p["key"]) for p in mappings])
+        for proposal in mappings:
+            proposal["affected"] = counts.get((proposal["task"], proposal["key"]), 0)
         rule_set = []
         for task, (table, _) in review.MAPS.items():
             counts = rows(conn, f"SELECT count(*) FILTER (WHERE status = 'approved') AS approved, "
@@ -246,9 +250,14 @@ def create_app(settings: config.Settings | None = None, transport=None) -> FastA
                                 f"count(*) FILTER (WHERE status = 'proposed') AS proposed, "
                                 f"count(*) FILTER (WHERE status = 'rejected') AS rejected FROM {table}")[0]
             rule_set.append({"task": task, **counts})
+        rejected = review.rejected_mappings(conn)
+        reopened = review.affected_counts(conn, [(r["task"], r["key"]) for r in rejected])
+        for item in rejected:
+            item["affected"] = reopened.get((item["task"], item["key"]), 0)
         return {
             "approver": settings.approver,
-            "mappings": [p for p in pending if p["task"] != "rule"],
+            "mappings": mappings,
+            "rejected": rejected,
             "rules": rows(conn, "SELECT id, agent_run, rule_id, column_names, finding, why_it_matters, action, risk, sql_kind, sql, "
                                 "expected_rows, measured_rows, validation, validation_msg, model, created_at "
                                 "FROM ops.rule_proposal WHERE status = 'proposed' ORDER BY id"),
@@ -265,7 +274,8 @@ def create_app(settings: config.Settings | None = None, transport=None) -> FastA
         else:
             if body.set_value is not None and (body.task != "category" or body.set_value not in classifier.taxonomy(settings)["categories"]):
                 raise HTTPException(400, "set_value must be one of the standard categories, and applies to category mappings only")
-            changed = review.approve_mappings(conn, body.task, settings.approver, body.keys, set_value=body.set_value)
+            changed = review.approve_mappings(conn, body.task, settings.approver, body.keys, set_value=body.set_value,
+                                              include_rejected=True)
         return {"changed": changed, "by": settings.approver}
 
     @api.post("/review/rules")

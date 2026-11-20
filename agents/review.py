@@ -31,10 +31,12 @@ def pending(conn: psycopg.Connection) -> list[dict]:
 
 
 def approve_mappings(conn: psycopg.Connection, task: str, approver: str, keys: list[str] | None = None,
-                     min_confidence: float | None = None, set_value: str | None = None) -> int:
-    """Approve held or provisional mappings. `set_value` overrides the proposed value (a correction by the reviewer)."""
+                     min_confidence: float | None = None, set_value: str | None = None,
+                     include_rejected: bool = False) -> int:
+    """Approve held or provisional mappings. `set_value` overrides the proposed value (a correction by the reviewer).
+    `include_rejected` lets the console reopen a value that was rejected earlier; the CLI keeps rejected closed."""
     table, _ = MAPS[task]
-    where, params = ["status IN ('proposed', 'provisional')"], []
+    where, params = [("status <> 'approved'" if include_rejected else "status IN ('proposed', 'provisional')")], []
     if keys:
         where.append("raw_key = ANY (%s)")
         params.append(keys)
@@ -59,6 +61,39 @@ def reject_mappings(conn: psycopg.Connection, task: str, approver: str, keys: li
                          "WHERE raw_key = ANY (%s) AND status <> 'approved'", (approver, keys)).rowcount
     conn.commit()
     return count
+
+
+def rejected_mappings(conn: psycopg.Connection) -> list[dict]:
+    """Values a person rejected. They are not applied, they keep their raw value in silver and stay unmapped;
+    the console lists them so a decision can be reopened."""
+    out = []
+    for task, (table, value) in MAPS.items():
+        for raw_key, std, by, at in conn.execute(
+                f"SELECT raw_key, {value}, approved_by, approved_at FROM {table} "
+                "WHERE status = 'rejected' ORDER BY approved_at DESC NULLS LAST, raw_key LIMIT 200"):
+            out.append({"task": task, "key": raw_key, "value": std, "decided_by": by,
+                        "decided_at": at.isoformat() if at else None})
+    return out
+
+
+def affected_counts(conn: psycopg.Connection, pairs: list[tuple[str, str]]) -> dict[tuple[str, str], int]:
+    """How many valid tickets each unresolved key is in, so a reviewer sees the consequence before deciding."""
+    if not pairs:
+        return {}
+    values = ", ".join(["(%s, %s)"] * len(pairs))
+    params = [item for pair in pairs for item in pair]
+    result = conn.execute(
+        f"""
+        WITH keys(task, raw_key) AS (VALUES {values})
+        SELECT k.task, k.raw_key, count(t.ticket_id)
+        FROM keys k LEFT JOIN silver.tickets t ON
+            (k.task = 'category' AND silver.norm_key(t.category_raw) = k.raw_key) OR
+            (k.task = 'priority' AND silver.norm_key(t.priority_raw) = k.raw_key) OR
+            (k.task = 'person'   AND silver.norm_key(t.submitted_by_raw) = k.raw_key) OR
+            (k.task = 'issue'    AND t.description_template = k.raw_key)
+        GROUP BY 1, 2
+        """, params).fetchall()
+    return {(task, key): int(count) for task, key, count in result}
 
 
 def review_rules(conn: psycopg.Connection, ids: list[int], approver: str, decision: str) -> int:

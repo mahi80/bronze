@@ -150,6 +150,7 @@ def test_mappings_are_approved_by_exact_key_and_only_then_change_silver(clean, s
     queue = client.get("/review").json()
     assert {m["key"]: (m["value"], m["status"]) for m in queue["mappings"]} == {
         "a/c": ("HVAC", "proposed"), "exterminator": ("Pest Control", "provisional"), "lift": ("Electrical", "provisional")}
+    assert all(m["affected"] > 0 for m in queue["mappings"])           # the consequence of each decision is known
     assert client.get("/overview").json()["pending"] == {"mappings": 3, "rules": 0}
 
     # the reviewer corrects the wrong answer while approving, rejects one, and leaves the third alone
@@ -162,6 +163,13 @@ def test_mappings_are_approved_by_exact_key_and_only_then_change_silver(clean, s
         "lift": "approved", "a/c": "rejected", "exterminator": "provisional"}
     assert read(conn, "SELECT category_std, source, approved_by FROM silver.category_map WHERE raw_key = 'lift'") == [
         ("Elevator", "human", settings.approver)]
+
+    # a rejection is listed, with the tickets it affects, and can be reopened
+    rejected = client.get("/review").json()["rejected"]
+    assert [r["key"] for r in rejected] == ["a/c"] and rejected[0]["affected"] > 0
+    assert decide(keys=["a/c"], decision="approve", set_value="HVAC").json()["changed"] == 1
+    assert client.get("/review").json()["rejected"] == []
+    assert read(conn, "SELECT category_std, status FROM silver.category_map WHERE raw_key = 'a/c'") == [("HVAC", "approved")]
 
     # an approval is a new rule set; silver changes on the next run, not before
     overview = client.get("/overview").json()

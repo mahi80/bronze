@@ -1,6 +1,6 @@
-# docker compose up --build      starts PostgreSQL, then runs bronze -> silver -> gold once
-# docker compose run --rm pipeline <command>      any other command (see README)
-# docker compose --profile console up --build     the same, plus the optional operator console on http://localhost:3000
+# docker compose up --build            PostgreSQL, the API and the console on http://localhost:3000; the database starts empty
+# docker compose run --rm pipeline run the pipeline once from the command line (same bronze path as the console)
+# docker compose --profile batch up    PostgreSQL and one pipeline run, without the console
 
 x-pipeline-environment: &pipeline-environment
   DATABASE_URL: postgresql://medallion:medallion@postgres:5432/medallion
@@ -36,6 +36,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   pipeline:
+    profiles: [batch]          # one batch run: `docker compose run --rm pipeline run` or `--profile batch up`
     build: .
     depends_on:
       postgres:
@@ -50,9 +51,8 @@ services:
       - ./docs:/app/docs                 # `prompts` rewrites docs/prompt_preview.md
       - ./README.md:/app/README.md       # `report --update-readme` refreshes the results block in place
 
-  # ---- optional operator console (profile "console"): an API over the pipeline, and the web console that calls it
+  # ---- the operator console: an API over the pipeline, and the web console that calls it
   api:
-    profiles: [console]
     build: .
     entrypoint: ["uvicorn", "pipeline.api:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
@@ -74,7 +74,6 @@ services:
       retries: 20
 
   console:
-    profiles: [console]
     build: ./console
     depends_on:
       api:

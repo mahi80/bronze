@@ -2,7 +2,7 @@
 
 // The workspace shell: navigation, the "Run pipeline" action and the notices every screen shares.
 // The layout follows the shell of my DataMigration console.
-import { Bot, ChevronRight, ClipboardCheck, Database, LayoutDashboard, Menu, Route, ShieldCheck, Table2, Workflow, X } from "lucide-react";
+import { Bot, ChevronRight, ClipboardCheck, Database, Layers3, LayoutDashboard, Menu, Route, ShieldCheck, Table2, Workflow, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { Overview, RunResult } from "./api";
@@ -12,6 +12,7 @@ import { AgentsView } from "./views/agents";
 import { DataView } from "./views/data";
 import { GoldView } from "./views/gold";
 import { OverviewView } from "./views/overview";
+import { PipelineView } from "./views/pipeline";
 import { QualityView } from "./views/quality";
 import { ReviewView } from "./views/review";
 import { RunButton, RunsView } from "./views/runs";
@@ -20,6 +21,7 @@ import { UploadButton } from "./upload";
 
 const VIEWS = {
   overview: { label: "Overview", icon: LayoutDashboard },
+  pipeline: { label: "Pipeline", icon: Layers3 },
   runs: { label: "Runs", icon: Workflow },
   data: { label: "Data", icon: Database },
   review: { label: "Review", icon: ClipboardCheck },
@@ -147,11 +149,12 @@ export function Console() {
             : place.view === "overview" ? <OverviewView overview={overview} refresh={refresh} pipeline={pipeline} onNavigate={navigate} onChanged={changed} />
             : data && !data.initialised ? (
               <section className="panel">
-                <EmptyState icon={Workflow} title="The pipeline has not run in this database yet"
-                  description="Run it once to create the tables and load the files in data/. This screen has nothing to show until then."
-                  action={<><RunButton pipeline={pipeline} /><UploadButton onChanged={changed} /></>} />
+                <EmptyState icon={Workflow} title="The pipeline has not run yet"
+                  description="Load the supplied file or upload a delivery, then run once: bronze lands every row, silver cleans and validates, gold aggregates. This screen fills in after that run."
+                  action={<><RunButton pipeline={pipeline} label="Load and run" /><UploadButton onChanged={changed} /></>} />
               </section>
             )
+            : place.view === "pipeline" ? <PipelineView overview={overview} refresh={refresh} pipeline={pipeline} onChanged={changed} onNavigate={navigate} />
             : place.view === "runs" ? <RunsView runId={place.run} refresh={refresh} pipeline={pipeline} onNavigate={navigate} />
             : place.view === "data" ? <DataView refresh={refresh} />
             : place.view === "review" ? <ReviewView refresh={refresh} onChanged={changed} onNavigate={navigate} />

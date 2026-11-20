@@ -5,7 +5,7 @@
 import { ArrowRight, Check, ClipboardCheck, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 import type { MappingProposal, ReviewQueue, RuleProposal } from "../api";
-import { api, count, errorMessage, useApi, words } from "../api";
+import { api, count, dateLabel, errorMessage, useApi, words } from "../api";
 import type { Navigate } from "../console";
 import { ConfirmDialog, DataTable, EmptyState, Loading, Meter, Notice, Panel, StatusBadge } from "../ui";
 
@@ -21,7 +21,9 @@ type Decision =
   | { kind: "mappings"; verdict: Verdict; items: MappingProposal[] }
   | { kind: "rules"; verdict: Verdict; items: RuleProposal[] };
 
-const idOf = (item: MappingProposal) => `${item.task}|${item.key}`;
+type Decidable = Pick<MappingProposal, "task" | "key" | "value">;
+
+const idOf = (item: { task: string; key: string }) => `${item.task}|${item.key}`;
 const plural = (n: number, word: string) => `${count(n)} ${word}${n === 1 ? "" : "s"}`;
 
 export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number; onChanged: () => void; onNavigate: Navigate }) {
@@ -41,11 +43,11 @@ export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number
     </div>
   );
   if (!queue.data) return <>{heading}{queue.error ? <Notice tone="danger">{queue.error}</Notice> : <Loading />}</>;
-  const { mappings, rules, rule_set: ruleSet, categories, approver } = queue.data;
+  const { mappings, rules, rejected, rule_set: ruleSet, categories, approver } = queue.data;
 
   /** The category this mapping would be approved with: the reviewer's choice, else the agent's if it is a standard one. */
-  const categoryFor = (item: MappingProposal) => corrections[idOf(item)] ?? (categories.includes(item.value) ? item.value : "");
-  const canApprove = (item: MappingProposal) => item.task !== "category" || categoryFor(item) !== "";
+  const categoryFor = (item: Decidable) => corrections[idOf(item)] ?? (categories.includes(item.value) ? item.value : "");
+  const canApprove = (item: Decidable) => item.task !== "category" || categoryFor(item) !== "";
 
   async function submit(decision: Decision) {
     setBusy(true);
@@ -67,7 +69,7 @@ export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number
         }
       }
       const what = plural(changed, decision.kind === "rules" ? "rule proposal" : "mapping");
-      const then = decision.verdict === "reject" ? ""
+      const then = decision.verdict === "reject" ? " Those values stay as delivered and counted as unmapped until a mapping is approved; the Rejected list below can reopen the decision."
         : decision.kind === "rules" ? " It runs as a check on every load from the next run. Only proposals with a confirmed row count can be approved."
         : " Silver is rebuilt with it on the next run.";
       setOutcome({ tone: "success", text: `${decision.verdict === "approve" ? "Approved" : "Rejected"} ${what} as ${approver}.${then}` });
@@ -140,7 +142,12 @@ export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number
                 <span className="meter-cell">{item.confidence.toFixed(2)}<Meter share={item.confidence} tone={item.status === "proposed" ? "amber" : "teal"} label={`Confidence ${item.confidence}`} /></span>
               ) },
               { key: "status", label: "Status", render: (item) => <StatusBadge status={item.status} /> },
-              { key: "reason", label: "Agent's reason", render: (item) => <>{item.reason || "—"}{item.model && <span className="table-subtitle">{item.model}</span>}</> },
+              { key: "reason", label: "Agent's reason", render: (item) => (
+                <>
+                  {item.reason || "—"}{item.model && <span className="table-subtitle">{item.model}</span>}
+                  <span className="table-subtitle">If rejected, {plural(item.affected, "ticket")} {item.affected === 1 ? "stays" : "stay"} counted as unmapped.</span>
+                </>
+              ) },
               { key: "actions", label: <span className="sr-only">Decide</span>, render: (item) => (
                 <span className="row-actions">
                   <button className="button secondary small" onClick={() => setAsking({ kind: "mappings", verdict: "reject", items: [item] })}><X size={14} />Reject</button>
@@ -180,6 +187,32 @@ export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number
         </Panel>
       )}
 
+      {rejected.length > 0 && (
+        <Panel title="Rejected, not applied" count={rejected.length}
+          description="Values a person turned down. Silver keeps the raw value for these rows and the Unmapped rows check counts them; approving one here reopens the decision.">
+          <DataTable stack rows={rejected} rowKey={idOf} minWidth={900} columns={[
+            { key: "task", label: "Mapping table", render: (row) => <strong>{TASKS[row.task]?.title ?? row.task}</strong> },
+            { key: "from", label: "Value in the file", render: (row) => <code>{row.key}</code> },
+            { key: "to", label: "Approve as", render: (row) => row.task !== "category" ? <strong>{row.value}</strong> : (
+              <>
+                <select aria-label={`Category to reopen ${row.key}`} value={categoryFor(row)} onChange={(event) => setCorrections((current) => ({ ...current, [idOf(row)]: event.target.value }))}>
+                  {!categoryFor(row) && <option value="">Choose a category</option>}
+                  {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+                </select>
+                <span className="table-subtitle">Rejected value {row.value} · approving maps {plural(row.affected, "ticket")} on the next run</span>
+              </>
+            ) },
+            { key: "who", label: "Rejected by", render: (row) => <>{row.decided_by || "—"}<span className="table-subtitle">{dateLabel(row.decided_at)}</span></> },
+            { key: "actions", label: <span className="sr-only">Reopen</span>, render: (row) => (
+              <button className="button secondary small" disabled={!canApprove(row)}
+                onClick={() => setAsking({ kind: "mappings", verdict: "approve", items: [{ ...row, status: "rejected", confidence: null, reason: null, model: null }] })}>
+                <Check size={14} />Approve instead
+              </button>
+            ) },
+          ]} />
+        </Panel>
+      )}
+
       <Panel title="The approved rule set" description="What silver is built with. Seed mappings were labelled by hand; the other columns are agent proposals at each stage of review.">
         <DataTable rows={ruleSet} rowKey={(row) => row.task} minWidth={640} columns={[
           { key: "task", label: "Mapping table", render: (row) => <strong>{TASKS[row.task]?.title ?? row.task}</strong> },
@@ -201,7 +234,7 @@ export function ReviewView({ refresh, onChanged, onNavigate }: { refresh: number
   );
 }
 
-function dialogText(decision: Decision, approver: string, categoryFor: (item: MappingProposal) => string) {
+function dialogText(decision: Decision, approver: string, categoryFor: (item: Decidable) => string) {
   const approving = decision.verdict === "approve";
   if (decision.kind === "rules") {
     return {
@@ -213,11 +246,12 @@ function dialogText(decision: Decision, approver: string, categoryFor: (item: Ma
       confirmLabel: approving ? "Approve as a check" : "Reject",
     };
   }
+  const affected = decision.items.reduce((total, item) => total + item.affected, 0);
   return {
     title: `${approving ? "Approve" : "Reject"} ${plural(decision.items.length, "mapping")}?`,
     body: approving
-      ? `Recorded as ${approver}. Approved mappings join the rule set, and silver is rebuilt with them on the next run.`
-      : `Recorded as ${approver}. A rejected value is not applied and not proposed again; its rows stay flagged as unmapped.`,
+      ? `Recorded as ${approver}. Approved mappings join the rule set, and ${count(affected)} ${affected === 1 ? "ticket uses" : "tickets use"} it on the next run.`
+      : `Recorded as ${approver}. The value is not applied: ${count(affected)} ${affected === 1 ? "ticket stays" : "tickets stay"} as delivered and counted as unmapped, and the Unmapped rows check shows it until a mapping is approved. The Rejected list can reopen this decision.`,
     items: decision.items.map((item) => `${item.key}  →  ${approving && item.task === "category" ? categoryFor(item) : item.value}`),
     confirmLabel: approving ? "Approve" : "Reject",
   };
