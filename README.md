@@ -407,8 +407,8 @@ repeats the category task three times without the cache.
 <!-- AGENT_RESULTS:END -->
 
 The Data Quality Agent row is the eval's own score. A hand check of the 35 proposals puts it at 13 of 18 covered,
-one of them only partly; three of the eval's 17 hits are keyword matches credited to a proposal about a different
-problem. The caveats below say which.
+plus one problem only partly; three of the eval's 17 hits are keyword matches credited to a proposal about a
+different problem. The caveats below say which.
 
 ### What each agent saved, on this file
 
