@@ -1,0 +1,3 @@
+# The supplied file is evidence, not source: keep the bytes exactly as delivered (CRLF included).
+# Without this, core.autocrlf rewrites the file on commit and it no longer matches the delivered checksum.
+data/raw_tickets.csv -text

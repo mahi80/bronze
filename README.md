@@ -246,8 +246,8 @@ The three gold tables are aggregates, not a warehouse design. With more sources 
 ### Incremental loads and backfill
 
 As built, files are tracked by SHA-256 in `ops.file_manifest`, so a re-delivered file is skipped. A test delivers
-a second file of four rows: the new rows land, a re-keyed ticket replaces the earlier version in silver (latest
-delivery wins), and both versions stay in bronze. A rerun changes nothing.
+a second file of four rows: the new rows land, and one ticket arrives again under the same ID with changed
+fields, so the latest delivery wins in silver while both versions stay in bronze. A rerun changes nothing.
 
 At scale I would merge silver by `ticket_id` after a watermark instead of rebuilding it, recompute a window of
 recent batches on every run for late data, and replay a range with a backfill command. Silver merges by key and
@@ -377,14 +377,15 @@ second, and would measure cache hit rates before committing to a budget.
 ### How the agents are assessed
 
 `python -m pipeline evals` scores both agents against golden sets I labelled by hand during profiling
-(`evals/golden/`), independent of the approved rule set:
+(`evals/golden/`). One caveat: the category golden set is the same key-to-label list that seeded
+`rules/category_map.csv`, so that score measures agreement with my own map, not a second opinion.
 
 | Golden set | Size | Scored on |
 |---|---|---|
 | Category map | 46 keys (62 raw spellings) → 10 labels | exact match; how many wrong answers were confident enough to auto-apply |
 | Person map | 30 keys → 16 people | false-merge pairs (the costly error) and missed-merge pairs |
 | Hazard signal | 66 templates, 12 marked ambiguous when I labelled them | accuracy on the 54 clear ones, and on all |
-| Data quality checklist | 18 known problems | recall; a problem counts as found when validated proposals on the right column cover the known rows |
+| Data quality checklist | 18 known problems | recall; a validated proposal counts when its own rows are at least 90% inside the known set and, together, they cover 40–80% of the known rows (the threshold varies by problem), or when the finding mentions one of the problem's keywords |
 | Injection probes | 10 crafted values | how many were followed |
 
 Results go to `ops.agent_eval` with model and prompt version. Every call's tokens, latency and cost are stored
@@ -405,11 +406,15 @@ repeats the category task three times without the cache.
 
 <!-- AGENT_RESULTS:END -->
 
+The Data Quality Agent row is the eval's own score. A hand check of the 35 proposals puts it at 13 of 18 covered,
+one of them only partly; three of the eval's 17 hits are keyword matches credited to a proposal about a different
+problem. The caveats below say which.
+
 ### What each agent saved, on this file
 
 | Agent | What it did | What it saved |
 |---|---|---|
-| Data Quality Agent | 17 of 18 known problems; 35 of 35 proposals validated; about $0.50 and 27 calls | No time: I had already written most of the rules. It pays on a new source or a drifted load, where the profile is the head start. |
+| Data Quality Agent | 13 of 18 known problems on a hand check (the eval credits 17, three by keyword on the wrong proposal); 35 of 35 proposals validated; about $0.50 and 27 calls | No time: I had already written most of the rules. It pays on a new source or a drifted load, where the profile is the head start. |
 | Semantic Classification Agent | 44 of 46 categories; 16 of 16 people with no false or missed merges; 96.3% hazard on unambiguous templates | Nothing on categories, which the lookup already covers. On people and hazard it produced answers a rule could not, which is the part I would keep. |
 
 Sample input for every task is in `docs/prompt_preview.md`. Sample output, every proposal with its validation
@@ -429,17 +434,32 @@ The numbers above are real. They are also narrower than they look.
 - **Hazard accuracy is per template, not per row.** Templates repeat unevenly in the file, so a row-weighted
   score would differ. The agent also produced 60 distinct issue types for 66 templates, which is too fine-grained
   to group on without tightening the taxonomy.
-- **"Found" is a generous test for the Data Quality Agent.** A problem counts as found when a validated proposal
-  on the right column covers at least 90% of the known rows, or when a keyword matches. It hit 17 of 18, but it
-  cost about $0.50 and 27 calls after I had already written most of the rules, so it saved no time here. The two
-  findings that mattered, the duplicates and the swapped columns, came from cross-column SQL I added to the
-  profiler. The agent is only as good as those scans.
+- **"Found" is a generous test for the Data Quality Agent, and 17 of 18 overstates it.** The eval counts a
+  problem as found when validated proposals on the right column cover 40–80% of the known rows (the threshold
+  varies by problem; each proposal's own rows must also be at least 90% inside the known set), or when a finding
+  mentions one of the problem's keywords. A hand check of the 35 proposals finds 13 of the 18 genuinely covered.
+  One is partial: the only duplicate rule matches a single group of two rows, while the pipeline flags 250.
+  Three more are credited by keyword to a proposal about a different problem: the category spellings, the
+  submitter spellings, and the open/closed-with-resolved_at contradiction. It cost about $0.50 and 27 calls after
+  I had already written most of the rules, so it saved no time here. The two findings that mattered, the
+  duplicates and the swapped columns, came from cross-column SQL I added to the profiler. The agent is only as
+  good as those scans.
 - **One file, one model, one afternoon.** Consistency was three repeats of 46 category inputs with the cache
   bypassed; it says the answers were stable in that run, nothing about a model upgrade. The defaults are the
   current list models, and the harness is what lets the next model be compared rather than assumed.
 - **These results do not measure the pipeline.** Bronze, silver and gold were built and checked before the agents
   ran, and no agent can change silver without an approved mapping. Remove the agents and the output is still the
   same 10,000 tickets.
+
+### Agents I did not build
+
+I skipped agents where a rule is enough. Resolution notes follow 11 fixed patterns and the regexes match all
+8,705 of them, so a model would add cost and variance for nothing. Schema inference for a single 13-column file
+is the same trade: writing the DDL took me minutes, and reviewing generated DDL would take about as long. Header
+drift is caught by a rule instead, and that is where inference starts to pay, with many sources. Gold design has
+a bigger problem. The useful input is knowing which fields can be trusted, and the timestamps here are random, so
+an agent given only the silver schema would propose sensible mechanics on top of bad assumptions. I would let it
+write date spines and window functions. I wouldn't let it pick the metrics.
 
 The limits I would watch next are cost and review load. $0.50 to evaluate is cheap; running the Data Quality
 Agent on every delivery is not, and a queue of 35 proposals is real work. The 0.9 confidence and three-row
@@ -520,7 +540,7 @@ sql/        00_schemas (DDL, parsers, hard checks), 20_silver, 30_gold
 pipeline/   cli, bronze, silver, gold, checks, profiler, rules, db, config; api (for the optional console)
 agents/     llm (providers, cache, budget), classifier, dq_agent, guard, review, evals, report, prompts/
 rules/      approved mappings (seed), cleaning_rules.yaml, thresholds.yaml, taxonomy.yaml
-evals/      golden sets; recordings of live runs for replay
+evals/      golden sets used by the agent eval
 tests/      parsers, pipeline, agent plumbing with a stub model, console API, incremental load, provider adapters
 console/    the optional operator console (Next.js); its request-policy tests run with `npm test`
 docs/       architecture.png, prompt_preview.md, console screenshots
