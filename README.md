@@ -7,7 +7,7 @@ The design rule is one sentence: **agents propose, code checks, a person approve
 plain SQL.** No model call sits in the row-by-row path, so the pipeline is deterministic, re-runnable, and works
 with no API key at all.
 
-https://github.com/user-attachments/assets/65ede0da-6b39-40fd-a31b-34f0ff5e6f1f
+https://github.com/user-attachments/assets/c65a4e67-ceb6-4e84-89c6-2f3555290e6e
 
 A three and a half minute narrated walkthrough, recorded in the console on the supplied file: the first run, a
 second delivery uploaded through the browser, the two mappings it puts in front of a person, and the re-run that
