@@ -87,8 +87,10 @@ def load_file(conn: psycopg.Connection, run_id: int, path: Path) -> dict:
     return {"file": path.name, "read": len(rows), "inserted": inserted, "skipped_file": False}
 
 
-def run(conn: psycopg.Connection, run_id: int, data_dir: Path) -> dict:
+def run(conn: psycopg.Connection, run_id: int, data_dir: Path, uploads_dir: Path | None = None) -> dict:
     files = sorted(data_dir.glob("*.csv"))
+    if uploads_dir is not None and uploads_dir.is_dir():
+        files += sorted(uploads_dir.glob("*.csv"))      # files uploaded through the console, same as a delivered file
     if not files:
         raise FileNotFoundError(f"no .csv files in {data_dir}")
     with db.stage(conn, run_id, "bronze") as counts:

@@ -6,6 +6,7 @@ x-pipeline-environment: &pipeline-environment
   DATABASE_URL: postgresql://medallion:medallion@postgres:5432/medallion
   SOURCE_TZ: ${SOURCE_TZ:-UTC}
   APPROVER: ${APPROVER:-reviewer}
+  UPLOAD_DIR: /app/uploads
   # agents are optional; values come from .env (see .env.example)
   LLM_PROVIDER: ${LLM_PROVIDER:-none}
   LLM_API_KEY: ${LLM_API_KEY:-}
@@ -42,6 +43,7 @@ services:
     environment: *pipeline-environment
     volumes:
       - ./data:/app/data:ro              # the supplied file is never modified
+      - ./data/uploads:/app/uploads      # CSVs loaded from the console land here, writable on purpose
       - ./rules:/app/rules               # approved mappings can be exported back for review
       - ./reports:/app/reports
       - ./evals/recordings:/app/evals/recordings
@@ -61,6 +63,7 @@ services:
       CONSOLE_API_TOKEN: ${CONSOLE_API_TOKEN:-local-console-token}
     volumes:
       - ./data:/app/data:ro
+      - ./data/uploads:/app/uploads
       - ./rules:/app/rules
       - ./reports:/app/reports
       - ./evals/recordings:/app/evals/recordings

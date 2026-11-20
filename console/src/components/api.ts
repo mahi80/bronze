@@ -91,6 +91,44 @@ export interface Quality {
   tags: { column_name: string; semantic_type: string; sensitivity: string; basis: string }[];
 }
 
+export interface ColumnProfile {
+  column: string;
+  rows: number;
+  blank: number;
+  blank_pct: number;
+  distinct: number;
+  min_length: number | null;
+  max_length: number | null;
+  padded_whitespace: number;
+  distinct_shapes: number;
+  shapes: { shape: string; rows: number; example?: string }[];
+  top_values: { value: string; rows: number }[];
+  numeric?: { rows: number; min: number; max: number };
+  note?: string;
+  tags: { semantic_type: string; sensitivity: string; basis: string };
+}
+
+export interface DataProfile {
+  initialised: boolean;
+  table?: string;
+  rows?: number;
+  purpose?: string;
+  columns?: ColumnProfile[];
+  cross_column?: {
+    candidate_key: string;
+    near_duplicates: { identical_except: string[]; groups: number; rows: number }[];
+    vocabulary_overlap: { column: string; holds_values_of: string; rows: number; example: string; meaning: string }[];
+    timestamp_order: { earlier_column: string; later_column: string; rows_with_both: number; rows_where_later_precedes_earlier: number; pct: number }[];
+  };
+}
+
+export interface DataRows {
+  initialised: boolean;
+  columns: string[];
+  rows: Record<string, Cell>[];
+  total: number;
+}
+
 export type Cell = string | number | boolean | null | string[];
 
 export interface GoldTable {

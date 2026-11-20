@@ -7,12 +7,12 @@ from dataclasses import replace
 import psycopg
 from fastapi.testclient import TestClient
 
-from pipeline import api, cli
+from pipeline import api, bronze, cli
 from stub_model import StubModel
 from test_3_agents import DQ_SCRIPT
 
 TOKEN = "test-token-not-a-secret"
-READ_ROUTES = ["/overview", "/runs", "/runs/1", "/quality", "/gold/sla_performance_monthly", "/tickets/TKT-1000", "/review",
+READ_ROUTES = ["/overview", "/runs", "/runs/1", "/quality", "/data/profile", "/data/rows", "/gold/sla_performance_monthly", "/tickets/TKT-1000", "/review",
                "/agents", "/agents/job"]
 
 
@@ -107,6 +107,24 @@ def test_quality_gold_and_ticket_trace_read_what_the_pipeline_wrote(clean, setti
     quarantined = client.get("/tickets/15").json()                          # a placeholder row: in bronze, not in silver
     assert quarantined["silver"] is None and len(quarantined["bronze"][0]["reject_reasons"]) == 4
     assert client.get("/tickets/TKT-999999").status_code == 404
+
+
+def test_data_view_profiles_bronze_and_serves_the_first_hundred_rows(clean, settings):
+    clean.rollback()                 # the profile is written from the API's own connection; do not hold a transaction
+    client = console(settings)
+    profile = client.get("/data/profile").json()
+    assert profile["initialised"] and profile["rows"] == 10280 and len(profile["columns"]) == 13
+    by_name = {column["column"]: column for column in profile["columns"]}
+    assert by_name["ticket_id"]["tags"]["semantic_type"] == "identifier"
+    masked = [column for column in profile["columns"] if column["tags"]["sensitivity"] == "personal_data"]
+    assert masked and all(column["top_values"] == [] for column in masked)             # a value never leaves for a prompt
+    assert profile["cross_column"]["candidate_key"] == "ticket_id" and profile["cross_column"]["near_duplicates"]
+
+    body = client.get("/data/rows").json()
+    assert body["columns"] == bronze.EXPECTED_COLUMNS and body["total"] == 10280 and len(body["rows"]) == 100
+    assert {"_source_file", "file_row", "ticket_id", "description"} <= set(body["rows"][0])
+    assert len(client.get("/data/rows?limit=5").json()["rows"]) == 5
+    assert {client.get("/data/rows?limit=0").status_code, client.get("/data/rows?limit=101").status_code} == {422}
 
 
 def test_mappings_are_approved_by_exact_key_and_only_then_change_silver(clean, settings, tmp_path):

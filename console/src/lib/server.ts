@@ -37,13 +37,42 @@ export async function backendRequest(target: string, method = "GET", body?: unkn
   } catch {
     throw new ConsoleError(502, "The pipeline API returned an unexpected response.");
   }
-  if (!response.ok) {
-    const detail = data && typeof data === "object" && typeof (data as { detail?: unknown }).detail === "string" ? (data as { detail: string }).detail : undefined;
-    const message = response.status === 401 ? "The console's API token was not accepted. CONSOLE_API_TOKEN must match on the console and the API."
-      : detail?.slice(0, 1000) || "The pipeline API could not complete this request.";
-    throw new ConsoleError(response.status >= 400 && response.status < 500 ? response.status : 502, message);
-  }
+  raiseForResponse(response, data);
   return data;
+}
+
+/** Forward a browser file upload to the pipeline API. The token and the size policy stay on this server. */
+export async function backendUpload(form: FormData): Promise<unknown> {
+  const config = configuration();
+  let response: Response;
+  try {
+    response = await fetch(`${config.api}/files`, {
+      method: "POST",
+      cache: "no-store",
+      redirect: "error",
+      headers: { Authorization: `Bearer ${config.token}` },
+      body: form,
+      signal: AbortSignal.timeout(90_000),
+    });
+  } catch {
+    throw new ConsoleError(502, "The API could not be reached for the upload. Check that it is running, then try again.");
+  }
+  let data: unknown;
+  try {
+    data = await readJsonBody(response, 1_000_000);
+  } catch {
+    throw new ConsoleError(502, "The pipeline API returned an unexpected response.");
+  }
+  raiseForResponse(response, data);
+  return data;
+}
+
+function raiseForResponse(response: Response, data: unknown) {
+  if (response.ok) return;
+  const detail = data && typeof data === "object" && typeof (data as { detail?: unknown }).detail === "string" ? (data as { detail: string }).detail : undefined;
+  const message = response.status === 401 ? "The console's API token was not accepted. CONSOLE_API_TOKEN must match on the console and the API."
+    : detail?.slice(0, 1000) || "The pipeline API could not complete this request.";
+  throw new ConsoleError(response.status >= 400 && response.status < 500 ? response.status : 502, message);
 }
 
 export function errorResponse(error: unknown) {

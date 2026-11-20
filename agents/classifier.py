@@ -142,7 +142,8 @@ def category_candidates(conn: psycopg.Connection, min_rows: int) -> tuple[list[I
                     FILTER (WHERE c.description_txt IS NOT NULL))[1:2] AS samples
         FROM silver.v_bronze_checked c
         WHERE cardinality(c.reject_reasons) = 0 AND c.category_txt IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM silver.category_map m WHERE m.raw_key = silver.norm_key(c.category_txt))
+          AND NOT EXISTS (SELECT 1 FROM silver.category_map m WHERE m.raw_key = silver.norm_key(c.category_txt)
+                                                               AND NOT (m.source = 'unseen' AND m.status = 'proposed'))
           -- rows the swap repair (R02) will fix carry a description in the category column: not a label to map
           AND NOT EXISTS (SELECT 1 FROM silver.category_map d WHERE d.raw_key = silver.norm_key(c.description_txt)
                                                                 AND d.status IN ('approved', 'provisional'))
@@ -239,7 +240,11 @@ def store(conn: psycopg.Connection, settings: Settings, outcome: Outcome) -> dic
             status = "provisional" if confident and not unknown else "proposed"
             conn.execute(
                 "INSERT INTO silver.category_map (raw_key, category_std, status, source, confidence, reason, model, prompt_version) "
-                "VALUES (%s, %s, %s, 'agent', %s, %s, %s, %s) ON CONFLICT (raw_key) DO NOTHING",
+                "VALUES (%s, %s, %s, 'agent', %s, %s, %s, %s) "
+                "ON CONFLICT (raw_key) DO UPDATE SET category_std = EXCLUDED.category_std, status = EXCLUDED.status, "
+                "source = 'agent', confidence = EXCLUDED.confidence, reason = EXCLUDED.reason, model = EXCLUDED.model, "
+                "prompt_version = EXCLUDED.prompt_version, proposed_at = now() "
+                "WHERE silver.category_map.source = 'unseen' AND silver.category_map.status = 'proposed'",
                 (result["value"], "Unclassified" if unknown else result["category"], status, *meta))
         elif outcome.task == "classify_person":
             status = "proposed"      # a merge is a decision about identity: always a person's call

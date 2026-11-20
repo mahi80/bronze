@@ -4,13 +4,16 @@ It adds no pipeline logic. Read routes query the ops, silver and gold tables; wr
 functions as the command line (run, approve, reject, agents). Every route except /health needs the bearer
 token from CONSOLE_API_TOKEN, which the console keeps on its server side and never sends to a browser.
 """
+import hashlib
 import hmac
+import re
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
 
 import psycopg
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
@@ -19,12 +22,13 @@ from agents import classifier, review
 from agents import cli as agents_cli
 from agents.llm import LLM, LLMDisabled, estimate_cost
 
-from . import bronze, checks, cli, config, db, gold, rules, silver
+from . import bronze, checks, cli, config, db, gold, profiler, rules, silver
 
 RUN_COLUMNS = ("SELECT run_id, command, status, started_at, finished_at, rule_set_version, message, "
                "round(extract(epoch FROM finished_at - started_at) * 1000) AS duration_ms FROM ops.pipeline_run")
 GOLD_MODELS = {name.split(".")[1]: name for name in gold.MODELS}
 NOT_RUN = "The pipeline has not run in this database yet. Run it once to create the tables."
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024      # a delivered file of this size is already far above any realistic batch
 
 
 class MappingDecision(BaseModel):
@@ -81,6 +85,26 @@ def create_app(settings: config.Settings | None = None, transport=None) -> FastA
     @app.get("/health")
     def health():
         return {"status": "ok"}
+
+    # ------------------------------------------------------------------ files
+    @api.post("/files")
+    async def upload_file(file: UploadFile = File(...)):
+        """Accept a delivered CSV into the uploads directory. The next run loads it through the same bronze path
+        as data/, so the manifest, header check and row hashes apply unchanged."""
+        name = Path(file.filename or "").name
+        if not name.lower().endswith(".csv"):
+            raise HTTPException(400, "Only .csv files are accepted.")
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "The file is larger than 20 MB.")
+        if not content.strip():
+            raise HTTPException(400, "The file is empty.")
+        digest = hashlib.sha256(content).hexdigest()
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name)[:80]
+        settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+        path = settings.uploads_dir / f"{digest[:12]}-{safe}"
+        path.write_bytes(content)                 # same content lands on the same name: the manifest skips a re-delivery
+        return {"file": path.name, "bytes": len(content), "sha256": digest[:12]}
 
     # ------------------------------------------------------------------ runs
     @api.get("/overview")
@@ -165,6 +189,27 @@ def create_app(settings: config.Settings | None = None, transport=None) -> FastA
             "flags": rows(conn, "SELECT flag, count(*) AS rows FROM silver.tickets, unnest(dq_flags) AS flag GROUP BY 1 ORDER BY 2 DESC, 1"),
             "tags": [tags[c] for c in bronze.EXPECTED_COLUMNS if c in tags],
         }
+
+    @api.get("/data/profile")
+    def data_profile(conn=Depends(connection)):
+        """The same fixed-size profile the Data Quality Agent reads, so the console shows what the agent sees."""
+        try:
+            profile = profiler.build(conn)
+        except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+            return {"initialised": False}
+        return {"initialised": True, **profile}
+
+    @api.get("/data/rows")
+    def data_rows(limit: int = Query(100, ge=1, le=100), conn=Depends(connection)):
+        """The first rows of bronze, as delivered: the landing table, not the cleaned one."""
+        columns = ", ".join(f'"{c}"' for c in bronze.EXPECTED_COLUMNS)
+        try:
+            data = rows(conn, f"SELECT _source_file, _source_row_number AS file_row, {columns} FROM bronze.tickets_raw "
+                              "ORDER BY _batch_id, _source_row_number LIMIT %s", (limit,))
+            total = conn.execute("SELECT count(*) FROM bronze.tickets_raw").fetchone()[0]
+        except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+            return {"initialised": False, "columns": bronze.EXPECTED_COLUMNS, "rows": [], "total": 0}
+        return {"initialised": True, "columns": bronze.EXPECTED_COLUMNS, "rows": data, "total": total}
 
     @api.get("/gold/{model}")
     def gold_model(model: str, limit: int = Query(2000, ge=1, le=5000), conn=Depends(connection)):

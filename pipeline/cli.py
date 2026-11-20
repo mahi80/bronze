@@ -34,7 +34,7 @@ def run_once(conn, settings) -> dict:
         rules.load_seeds(conn, settings.rules_dir)
         run_id = db.start_run(conn, "run")
         try:
-            bronze.run(conn, run_id, settings.data_dir)
+            bronze.run(conn, run_id, settings.data_dir, settings.uploads_dir)
             summary = silver.run(conn, run_id, settings)
             summary["agent_checks"] = agent_checks.run_approved(conn, run_id, settings)
             summary["gold"] = gold.run(conn, run_id, summary["rule_set_version"])

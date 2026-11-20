@@ -23,7 +23,7 @@ export function requireSameOrigin(request: Request, allowedOrigins: string[]): v
   }
 }
 
-const READ = /^(health|overview|runs|runs\/\d{1,12}|quality|gold\/[a-z_]{1,40}|tickets\/[A-Za-z0-9-]{1,40}|review|agents|agents\/job)$/;
+const READ = /^(health|overview|runs|runs\/\d{1,12}|quality|data\/profile|data\/rows|gold\/[a-z_]{1,40}|tickets\/[A-Za-z0-9-]{1,40}|review|agents|agents\/job)$/;
 const WRITE = /^(runs|review\/mappings|review\/rules|agents\/(classify|dq))$/;
 
 /** Turn a browser request into an API path, or refuse. Only the routes the console uses are forwarded. */
@@ -32,7 +32,7 @@ export function backendTarget(method: string, path: string[], query: URLSearchPa
   if (!((method === "GET" && READ.test(joined)) || (method === "POST" && WRITE.test(joined)))) {
     throw new ConsoleError(404, "This console operation is not available.");
   }
-  const allowed = method === "GET" && joined === "runs" ? ["limit"] : [];
+  const allowed = method === "GET" && (joined === "runs" || joined === "data/rows") ? ["limit"] : [];
   const clean = new URLSearchParams();
   for (const [key, value] of query) {
     if (!allowed.includes(key) || clean.has(key) || !/^\d{1,4}$/.test(value)) {

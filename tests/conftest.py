@@ -26,6 +26,7 @@ def settings(tmp_path_factory):
     data_dir = tmp_path_factory.mktemp("data")
     shutil.copy(ROOT / "data" / "raw_tickets.csv", data_dir / "raw_tickets.csv")
     yield replace(base, database_url=psycopg.conninfo.make_conninfo(base.database_url, dbname=scratch), data_dir=data_dir,
+                  uploads_dir=tmp_path_factory.mktemp("uploads"),
                   reports_dir=tmp_path_factory.mktemp("reports"), llm_provider="none",
                   replay_dir=tmp_path_factory.mktemp("recordings"))
     with psycopg.connect(base.database_url, autocommit=True) as admin:
@@ -34,7 +35,7 @@ def settings(tmp_path_factory):
 
 def run_pipeline(conn, settings) -> dict:
     run_id = db.start_run(conn, "test")
-    bronze.run(conn, run_id, settings.data_dir)
+    bronze.run(conn, run_id, settings.data_dir, settings.uploads_dir)
     summary = silver.run(conn, run_id, settings)
     summary["gold"] = gold.run(conn, run_id, summary["rule_set_version"])
     db.finish_run(conn, run_id, "succeeded", rule_set_version=summary["rule_set_version"])

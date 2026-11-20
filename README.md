@@ -7,11 +7,17 @@ The design rule is one sentence: **agents propose, code checks, a person approve
 plain SQL.** No model call sits in the row-by-row path, so the pipeline is deterministic, re-runnable, and works
 with no API key at all.
 
+[![Walkthrough: the console from upload to re-run](docs/walkthrough-poster.png)](docs/walkthrough.mp4)
+
+A three and a half minute narrated walkthrough, recorded in the console on the supplied file: the first run, a
+second delivery uploaded through the browser, the two mappings it puts in front of a person, and the re-run that
+applies them. The title card is the architecture; a still version is in `docs/architecture.png`.
+
 | | |
 |---|---|
 | Result on the supplied file | 10,280 raw rows → 30 quarantined → 10,250 valid tickets → 250 duplicates flagged → **10,000 unique tickets** |
 | Run time | two to three seconds for bronze, silver and gold on this file |
-| Tests | 75, against a real PostgreSQL (`pytest`) |
+| Tests | 80, against a real PostgreSQL (`pytest`) |
 | Agents | Data Quality Agent (option b) and Semantic Classification Agent (option c) |
 
 ## How to run
@@ -42,6 +48,22 @@ docker compose --profile console up --build
 ```
 
 Without Docker: `pip install -r requirements.txt`, set `DATABASE_URL`, then `python -m pipeline run`.
+
+### Windows, through WSL2
+
+Checked on this machine: Windows 11 with Docker Desktop, and Ubuntu 24.04 on WSL2 with Docker Desktop's WSL
+integration on. In a WSL terminal:
+
+```bash
+git clone https://github.com/mahi80/bronze.git && cd bronze
+docker compose up --build
+```
+
+Clone inside the Linux home directory, not under `/mnt/c`: file permissions and build speed are better, and
+files uploaded from the console keep Linux ownership. The console is the same command with `--profile console`,
+then open http://localhost:3000 in Windows, which WSL2 forwards. The supplied file arrives byte-identical —
+`sha256sum data/raw_tickets.csv` starts with `2bf36d21` — because `.gitattributes` marks it binary so no
+line-ending conversion touches it.
 
 ## Architecture
 
@@ -501,10 +523,14 @@ docker compose --profile console up --build     # then open http://localhost:300
 
 ![Console overview: rows per layer, the reconciliation, the threshold checks](docs/console-overview.png)
 
+Upload a CSV loads a later delivery through the same bronze path as the supplied file, then a run reconciles it.
+The walkthrough at the top of this file shows that round trip.
+
 | Screen | What it shows and does |
 |---|---|
-| Overview | Rows in each layer with the reconciliation the last run asserted, the threshold signals, what is waiting for review. Starts a run |
+| Overview | Rows in each layer with the reconciliation the last run asserted, the threshold signals, what is waiting for review. Starts a run; uploads a delivered CSV |
 | Runs | Run history. Per run: the stages, the measured effect of every rule, alerts and drift, lineage |
+| Data | The first 100 rows of bronze exactly as delivered, and the fixed-size profile the Data Quality Agent reads: blanks per column, near-duplicates, values in the wrong column, timestamps out of order, the candidate key, and which columns are sensitive and why |
 | Review | Agent proposals with their evidence. For a mapping: value, confidence, reason. For a rule: the SQL, the claimed and the measured row count. Approve, correct while approving, or reject |
 | Data quality | Every cleaning rule with its measured effect, the quarantine with reasons, flags, column tags |
 | Gold | The three models, filterable and sortable, with coverage beside every rate |
@@ -543,7 +569,7 @@ rules/      approved mappings (seed), cleaning_rules.yaml, thresholds.yaml, taxo
 evals/      golden sets used by the agent eval
 tests/      parsers, pipeline, agent plumbing with a stub model, console API, incremental load, provider adapters
 console/    the optional operator console (Next.js); its request-policy tests run with `npm test`
-docs/       architecture.png, prompt_preview.md, console screenshots
+docs/       architecture.png, walkthrough.mp4 (narrated, captioned), prompt_preview.md, console screenshots
 ```
 
 The agent tests use a stub in place of a model and prove only the plumbing: batching, validation, retries, the

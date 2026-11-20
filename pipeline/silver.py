@@ -36,6 +36,24 @@ def record_dq_results(conn: psycopg.Connection, run_id: int, settings: Settings)
     return results
 
 
+def queue_unseen_categories(conn: psycopg.Connection, min_rows: int) -> int:
+    """Queue every category the rebuild marked Unclassified, so a person always has a decision to make. Reading
+    from silver itself keeps swapped and repaired values out. A value seen fewer than `min_rows` times is flagged
+    but not queued, the same rule the classifier applies; that keeps one-off prose and typos out of the queue.
+    The placeholder is 'Unclassified' (what silver already shows); the classifier replaces it when a provider is
+    configured. Any existing row — rejected or approved — is left alone."""
+    return conn.execute(
+        """
+        INSERT INTO silver.category_map (raw_key, category_std, status, source, reason)
+        SELECT silver.norm_key(t.category_raw), 'Unclassified', 'proposed', 'unseen',
+               'Seen in a valid ticket but in no approved mapping; approve with a standard category.'
+        FROM silver.tickets t
+        WHERE t.category_std = 'Unclassified' AND t.category_raw IS NOT NULL AND silver.norm_key(t.category_raw) <> ''
+        GROUP BY 1 HAVING count(*) >= %s
+        ON CONFLICT (raw_key) DO NOTHING
+        """, (min_rows,)).rowcount
+
+
 def run(conn: psycopg.Connection, run_id: int, settings: Settings) -> dict:
     version = rules.rule_set_version(conn)
     with db.stage(conn, run_id, "silver") as counts:
@@ -50,10 +68,11 @@ def run(conn: psycopg.Connection, run_id: int, settings: Settings) -> dict:
             raise AssertionError(f"reconciliation failed: bronze={bronze_rows} silver={tickets} rejected={rejected} superseded={superseded}")
         duplicates = conn.execute("SELECT count(*) FROM silver.tickets WHERE is_duplicate").fetchone()[0]
         record_dq_results(conn, run_id, settings)
+        queued = queue_unseen_categories(conn, settings.classify_min_rows)
         db.lineage(conn, run_id, "bronze.tickets_raw", "silver.tickets", "sql/20_silver.sql", version)
         db.lineage(conn, run_id, "bronze.tickets_raw", "silver.tickets_rejected", "sql/20_silver.sql (rule R01)", version)
         counts.update(rows_in=bronze_rows, rows_out=tickets, rows_rejected=rejected,
                       message=f"rule_set={version} duplicates_flagged={duplicates} superseded={superseded} "
-                              f"current={tickets - duplicates} reconciled=bronze==silver+rejected+superseded")
+                              f"current={tickets - duplicates} queued_unseen={queued} reconciled=bronze==silver+rejected+superseded")
     return {"rule_set_version": version, "bronze": bronze_rows, "silver": tickets, "rejected": rejected,
             "superseded": superseded, "duplicates": duplicates, "current": tickets - duplicates}

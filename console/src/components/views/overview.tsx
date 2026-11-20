@@ -5,11 +5,12 @@ import type { Overview, Run, Signal } from "../api";
 import { count, dateLabel, duration, signalName, useApi } from "../api";
 import type { Navigate } from "../console";
 import { DataTable, EmptyState, LayerDot, Loading, Meter, Panel, StatusBadge } from "../ui";
+import { UploadButton } from "../upload";
 import type { Pipeline } from "./runs";
 import { RunButton, runColumns } from "./runs";
 
-export function OverviewView({ overview, refresh, pipeline, onNavigate }: {
-  overview: { data?: Overview; loading: boolean }; refresh: number; pipeline: Pipeline; onNavigate: Navigate;
+export function OverviewView({ overview, refresh, pipeline, onNavigate, onChanged }: {
+  overview: { data?: Overview; loading: boolean }; refresh: number; pipeline: Pipeline; onNavigate: Navigate; onChanged: () => void;
 }) {
   const recent = useApi<{ runs: Run[] }>(overview.data?.initialised ? "runs?limit=5" : null, refresh);
   const data = overview.data;
@@ -19,7 +20,7 @@ export function OverviewView({ overview, refresh, pipeline, onNavigate }: {
         <h1>Overview</h1>
         <p>What the last run loaded, what it set aside, and whether every row is accounted for.</p>
       </div>
-      <div className="heading-actions"><RunButton pipeline={pipeline} /></div>
+      <div className="heading-actions"><UploadButton onChanged={onChanged} /><RunButton pipeline={pipeline} /></div>
     </div>
   );
   if (!data) return <>{heading}{overview.loading && <Loading />}</>;

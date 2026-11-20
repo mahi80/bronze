@@ -15,6 +15,7 @@ def _env(name: str, default: str) -> str:
 class Settings:
     database_url: str
     data_dir: Path
+    uploads_dir: Path              # where the console's CSV upload lands; loaded by the same bronze glob
     rules_dir: Path
     reports_dir: Path
     source_tz: str                 # time zone of the source system; epoch values are converted to it
@@ -39,6 +40,7 @@ def load() -> Settings:
     return Settings(
         database_url=_env("DATABASE_URL", "postgresql://medallion:medallion@localhost:5432/medallion"),
         data_dir=Path(_env("DATA_DIR", str(ROOT / "data"))),
+        uploads_dir=Path(_env("UPLOAD_DIR", str(ROOT / "data" / "uploads"))),
         rules_dir=Path(_env("RULES_DIR", str(ROOT / "rules"))),
         reports_dir=Path(_env("REPORTS_DIR", str(ROOT / "reports"))),
         source_tz=_env("SOURCE_TZ", "UTC"),

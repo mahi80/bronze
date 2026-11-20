@@ -11,3 +11,6 @@ console/.next/
 console/next-env.d.ts
 console/*.tsbuildinfo
 console/.env*.local
+
+# CSVs uploaded through the console are delivery data, not source
+data/uploads/*.csv
