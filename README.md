@@ -204,6 +204,20 @@ Models I chose not to build: a daily building × category table (547 days × 170
 all zeros), resolution-time rankings of assignees (the timestamps cannot support them), and a misrouted-ticket
 measure (assignee is independent of category).
 
+### Dimensional model, if this became a warehouse
+
+The three gold tables are aggregates, not a warehouse design. With more sources I would add:
+
+- Conformed dimensions for date, location, category, person and assignee. `building` mixes site and floor
+  ("HQ Floor 1"), and `assigned_to` mixes vendors with one named person, so location and assignee both need a
+  type before they can be conformed.
+- One fact table at ticket grain, with cost, SLA hours and resolution hours as measures. The current gold
+  tables become views over it, so a metric such as SLA attainment is defined once.
+- Cross-source reconciliation: vendor invoices against ticket cost by assignee and month, and an HR roster
+  against the person map. Those are the checks I would want before trusting the cost and workload numbers.
+- The source key stays on the fact row (`ticket_id` plus the bronze row hash), so a conformed row can still be
+  traced back to the source file.
+
 ## Pipeline behaviour
 
 - **Idempotent.** Bronze skips files it has loaded. Silver and gold are rebuilt in a transaction from the same
@@ -212,6 +226,8 @@ measure (assignee is independent of category).
   started meanwhile stops at once instead of interleaving.
 - **Logged.** `ops.pipeline_run` and `ops.stage_log` record rows in, out and rejected for every stage; the
   console prints one line per event with the run ID. `ops.dq_results` records the effect of every rule per run.
+  `ops.agent_call` records the model, prompt version, tokens, latency and response for every accepted call, which
+  is where the cost table in the report comes from.
 - **Lineage.** Every silver row carries the bronze row hash, batch, run and rule set version. `ops.lineage_edge`
   records source, target, transformation, rule set version, who and when for every stage. Every mapping row
   records who proposed and who approved it. A gold figure can be traced to the exact lines of the file.
@@ -226,6 +242,16 @@ measure (assignee is independent of category).
   values are withheld from the profile the agent reads. Two known gaps: the rules miss `assigned_to`, which
   mixes vendors with one named person, and the agent's probe queries are not masked, so a probe can still read
   a tagged column.
+
+### Incremental loads and backfill
+
+As built, files are tracked by SHA-256 in `ops.file_manifest`, so a re-delivered file is skipped. A test delivers
+a second file of four rows: the new rows land, a re-keyed ticket replaces the earlier version in silver (latest
+delivery wins), and both versions stay in bronze. A rerun changes nothing.
+
+At scale I would merge silver by `ticket_id` after a watermark instead of rebuilding it, recompute a window of
+recent batches on every run for late data, and replay a range with a backfill command. Silver merges by key and
+gold replaces whole month partitions, so a replay cannot double count.
 
 ## The agents
 
@@ -257,6 +283,24 @@ loop) → automatic checks → risk policy → approval → deterministic SQL.
 - **Changes nothing by itself.** Proposals wait in `ops.rule_proposal`. Approved predicates run as checks on
   every load and report into `ops.dq_results`.
 
+Sample input and output from one live call (`reports/agent_report.md` has the full version; the profile is
+abridged here):
+
+```text
+FOCUS: column ticket_id
+{"column": "ticket_id", "rows": 10280, "blank": 8, "distinct": 10261,
+ "shapes": [{"shape": "aaa-9999", "rows": 9000}, {"shape": "aaa-99999", "rows": 1254},
+            {"shape": "a/a", "rows": 9}, {"shape": "aaaa", "rows": 5}, {"shape": "99", "rows": 4}],
+ "tags": {"semantic_type": "identifier", "sensitivity": "none", "basis": "fixed pattern, unique"}}
+```
+
+```json
+{"proposals": [{"rule_id": "ticket_id_placeholder_to_null", "action": "set_null",
+  "columns": ["ticket_id"], "sql": "ticket_id IN ('N/A','NULL')", "expected_rows": 14,
+  "finding": "14 rows hold a placeholder instead of an ID: 'N/A' in 9 rows and 'NULL' in 5 rows. Both are text strings, not real nulls.",
+  "why_it_matters": "Placeholder strings pass as ordinary values in counts and joins. 'N/A' and 'NULL' would each be treated as a single ticket, which hides the missing keys and can create false matches."}]}
+```
+
 ### Semantic Classification Agent (option c)
 
 | Task | Sent to the model | Lands in silver as |
@@ -276,6 +320,29 @@ loop) → automatic checks → risk policy → approval → deterministic SQL.
   in the input, so the model cannot invent a person. A rejected answer is retried once with the reason.
 - **Policy.** Category and issue mappings at or above 0.9 confidence are applied as *provisional* and listed for
   review; anything lower is held. A person merge is a decision about identity and is always held for approval.
+
+Sample input and output from one live call:
+
+```text
+{"key": "v001", "value": "access control", "rows": 176, "samples": ["Badge reader at <BLDG> main entrance not working. Staff can't get in.", "Door <N> won't lock. Handle mechanism seems broken."]}
+```
+
+```json
+{"key": "v001", "category": "Security & Access", "confidence": 0.97,
+ "reason": "Access control matches badges, locks, and door access systems."}
+```
+
+### Approval gates
+
+Nothing an agent proposes changes silver on its own.
+
+| Change | Gate |
+|---|---|
+| Category or issue mapping at 0.9 confidence or more, not `unknown` | Applied as provisional and listed for review |
+| Lower confidence, or `unknown` | Held as proposed; not applied |
+| Person merge | Always held for a person, whatever the confidence |
+| Data Quality Agent proposal | Must pass the SQL guard and the claimed-vs-measured row count, then be approved by a person; it runs as a check and never rewrites silver |
+| Approved mappings | `export-rules` writes them back to `rules/*.csv`, so the approval is a reviewable commit |
 
 ### Prompts
 
@@ -320,8 +387,9 @@ second, and would measure cache hit rates before committing to a budget.
 | Data quality checklist | 18 known problems | recall; a problem counts as found when validated proposals on the right column cover the known rows |
 | Injection probes | 10 crafted values | how many were followed |
 
-Results go to `ops.agent_eval` with model and prompt version, so a prompt, tool or model change can be compared
-before it is accepted. `--consistency` repeats the category task three times without the cache.
+Results go to `ops.agent_eval` with model and prompt version. Every call's tokens, latency and cost are stored
+in `ops.agent_call`, so a prompt, tool or model change can be compared before it is accepted. `--consistency`
+repeats the category task three times without the cache.
 
 ### Measured results
 
@@ -336,6 +404,13 @@ before it is accepted. `--consistency` repeats the category task three times wit
 | Consistency |  | 100.0% agreement over 3 uncached runs | unstable values: 0 |
 
 <!-- AGENT_RESULTS:END -->
+
+### What each agent saved, on this file
+
+| Agent | What it did | What it saved |
+|---|---|---|
+| Data Quality Agent | 17 of 18 known problems; 35 of 35 proposals validated; about $0.50 and 27 calls | No time: I had already written most of the rules. It pays on a new source or a drifted load, where the profile is the head start. |
+| Semantic Classification Agent | 44 of 46 categories; 16 of 16 people with no false or missed merges; 96.3% hazard on unambiguous templates | Nothing on categories, which the lookup already covers. On people and hazard it produced answers a rule could not, which is the part I would keep. |
 
 Sample input for every task is in `docs/prompt_preview.md`. Sample output, every proposal with its validation
 result, and token usage are written to `reports/agent_report.md` by `python -m pipeline report`, verbatim from
