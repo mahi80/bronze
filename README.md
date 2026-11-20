@@ -52,19 +52,39 @@ Without Docker: `pip install -r requirements.txt`, set `DATABASE_URL`, then `pyt
 
 ### Windows, through WSL2
 
-Checked on this machine: Windows 11 with Docker Desktop, and Ubuntu 24.04 on WSL2 with Docker Desktop's WSL
-integration on. In a WSL terminal:
+Step by step:
 
-```bash
-git clone https://github.com/mahi80/bronze.git && cd bronze
-docker compose up --build
-```
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and start it.
+2. Under **Settings → Resources → WSL integration**, switch on integration for your distribution
+   (Ubuntu by default when WSL2 is enabled).
+3. Open the Ubuntu terminal — from the Start menu, or run `wsl` in PowerShell.
+4. Clone into the Linux home directory and start the stack:
 
-Clone inside the Linux home directory, not under `/mnt/c`: file permissions and build speed are better, and
-files uploaded from the console keep Linux ownership. The console is the same command with `--profile console`,
-then open http://localhost:3000 in Windows, which WSL2 forwards. The supplied file arrives byte-identical —
-`sha256sum data/raw_tickets.csv` starts with `2bf36d21` — because `.gitattributes` marks it binary so no
-line-ending conversion touches it.
+   ```bash
+   git clone https://github.com/mahi80/bronze.git ~/bronze
+   cd ~/bronze
+   docker compose up --build
+   ```
+
+   The first build takes a few minutes. The pipeline container then runs once and exits; PostgreSQL stays up.
+
+5. Run it again to see that it is idempotent — the row counts do not change:
+
+   ```bash
+   docker compose run --rm pipeline run
+   ```
+
+6. For the console, add the profile and open http://localhost:3000 in Windows:
+
+   ```bash
+   docker compose --profile console up --build
+   ```
+
+Clone into `~/`, not under `/mnt/c`: permissions and build speed are much better there. The supplied file
+arrives byte-identical — `sha256sum data/raw_tickets.csv` starts with `2bf36d21` — so the brief's "do not modify
+this file" rule holds even on Windows, where a checkout converted by Git would fail that checksum.
+
+This sequence was run from a fresh clone on Ubuntu 24.04 under WSL2 with Docker Desktop.
 
 ## Architecture
 
