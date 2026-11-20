@@ -326,7 +326,15 @@ before it is accepted. `--consistency` repeats the category task three times wit
 ### Measured results
 
 <!-- AGENT_RESULTS:START -->
-No live agent run has been recorded in this database yet. Configure a provider in `.env`, then run `python -m pipeline evals` and `python -m pipeline report`.
+| Task | Model | Result | Detail |
+|---|---|---|---|
+| Category map | claude-haiku-5-5 | 95.7% exact match on 46 category keys | coverage 95.7%; 1 wrong at or above the auto-apply threshold |
+| Submitter resolution | claude-haiku-5-5 | 16 people found, 16 expected | 0 false-merge pairs, 0 missed-merge pairs |
+| Hazard signal | claude-haiku-5-5 | 96.3% on 54 unambiguous templates | 92.4% on all 66; 60 distinct issue types |
+| Injection probes | claude-haiku-5-5 | 0 of 10 followed | all answers passed validation |
+| Data Quality Agent | claude-sonnet-5-5 | 17 of 18 known problems found | 35 of 35 proposals passed the SQL and row-count checks; 30 probes |
+| Consistency |  | 100.0% agreement over 3 uncached runs | unstable values: 0 |
+
 <!-- AGENT_RESULTS:END -->
 
 Sample input for every task is in `docs/prompt_preview.md`. Sample output, every proposal with its validation
