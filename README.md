@@ -48,7 +48,10 @@ docker compose run --rm pipeline prompts             # write the exact prompts, 
 docker compose --profile console up --build
 ```
 
-Without Docker: `pip install -r requirements.txt`, set `DATABASE_URL`, then `python -m pipeline run`.
+Without Docker: `pip install -r requirements.txt`, set `DATABASE_URL`, then `python -m pipeline run`. Its default
+is `localhost:5432`; to run it against the Compose database instead, use
+`postgresql://medallion:medallion@localhost:5433/medallion` (Compose publishes PostgreSQL on 5433 so it does not
+clash with a local install).
 
 ### Linux (Ubuntu)
 
